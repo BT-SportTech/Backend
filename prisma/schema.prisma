@@ -1,0 +1,147 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum SchoolType {
+  PUBLIC
+  PRIVATE
+  INTERNATIONAL
+  RESIDENTIAL
+  GOVERNMENT_AIDED
+}
+
+enum UserRole {
+  STUDENT
+  PROFESSIONAL
+  ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+// ─── School ──────────────────────────────────────────────────────────────────
+
+model School {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isActive  Boolean  @default(true)
+
+  // 1. Basic
+  name                 String
+  code                 String      @unique
+  logoUrl              String?
+  type                 SchoolType
+  yearEstablished      Int?
+  managingOrganization String?
+  principalName        String?
+  chairmanName         String?
+  tagline              String?
+  website              String?
+  contactNumber        String?
+  email                String?
+
+  // 2. Location
+  state         String?
+  district      String?
+  city          String?
+  landmark      String?
+  fullAddress   String?
+  pincode       String?
+  googleMapsUrl String?
+  latitude      Float?
+  longitude     Float?
+
+  // 6. Infrastructure
+  campusArea         String?
+  playground         String?
+  sportsFacilities   String[]
+  hasSwimmingPool    Boolean  @default(false)
+  hasIndoorSportsArena Boolean @default(false)
+
+  // 7. Faculty (non-duplicate)
+  sportsInstructor String?
+
+  // 8. Student counts
+  totalStudents  Int?
+  boysCount      Int?
+  girlsCount     Int?
+  boysEnrolled   Int?
+  girlsEnrolled  Int?
+
+  // 16. Media (URLs only)
+  campusPhotos      String[]
+  eventPhotos       String[]
+  sportsEventPhotos String[]
+  videos            String[]
+  virtualTourUrl    String?
+
+  // 17. Awards & Recognition
+  bestSchoolAwards      String[]
+  governmentRecognitions String[]
+  accreditationDetails  String[]
+  rankings              String[]
+  certifications        String[]
+
+  // Relations
+  students User[]
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  firstName   String
+  lastName    String
+  email       String   @unique
+  phone       String?
+  passwordHash String
+
+  role        UserRole @default(STUDENT)
+  gender      Gender?
+  dateOfBirth DateTime?
+
+  // Location
+  state    String?
+  district String?
+  city     String?
+  pincode  String?
+
+  sportsInterested String[]
+
+  // Student-only
+  schoolId     String?
+  presentClass Int?
+  school       School? @relation(fields: [schoolId], references: [id])
+
+  // Professional-only
+  company String?
+
+  // Relations
+  refreshTokens RefreshToken[]
+}
+
+// ─── Refresh Token ────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+}
