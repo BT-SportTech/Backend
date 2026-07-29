@@ -52,6 +52,11 @@ pids
 *.seed
 *.pid.lock
 
+# Uploaded files
+/uploads/*
+!/uploads/school-logos/
+!/uploads/school-logos/.gitkeep
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 node_modules
