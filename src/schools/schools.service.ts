@@ -1,6 +1,8 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSchoolDto } from './dto/create-school.dto';
+import { SchoolQueryDto } from './dto/school-query.dto';
 import { UpdateSchoolDto } from './dto/update-school.dto';
 
 @Injectable()
@@ -13,31 +15,67 @@ export class SchoolsService {
     return this.prisma.school.create({ data: dto });
   }
 
-  findAll(search?: string) {
-    return this.prisma.school.findMany({
-      where: {
-        isActive: true,
-        ...(search
-          ? {
-              OR: [
-                { name: { contains: search, mode: 'insensitive' } },
-                { city: { contains: search, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
+  async findAll(query: SchoolQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.SchoolWhereInput = {
+      isActive: query.isActive ?? true,
+      ...(query.type ? { type: query.type } : {}),
+      ...(query.state ? { state: { equals: query.state, mode: 'insensitive' } } : {}),
+      ...(query.district
+        ? { district: { equals: query.district, mode: 'insensitive' } }
+        : {}),
+      ...(query.city ? { city: { equals: query.city, mode: 'insensitive' } } : {}),
+      ...(query.pincode ? { pincode: query.pincode } : {}),
+      ...(query.search
+        ? {
+            OR: [
+              { name: { contains: query.search, mode: 'insensitive' } },
+              { code: { contains: query.search, mode: 'insensitive' } },
+              { city: { contains: query.search, mode: 'insensitive' } },
+              { district: { contains: query.search, mode: 'insensitive' } },
+              { state: { contains: query.search, mode: 'insensitive' } },
+              { email: { contains: query.search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.school.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          code: true,
+          type: true,
+          city: true,
+          district: true,
+          state: true,
+          pincode: true,
+          logoUrl: true,
+          isActive: true,
+          contactNumber: true,
+          email: true,
+        },
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.school.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 0,
       },
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        type: true,
-        city: true,
-        district: true,
-        state: true,
-        logoUrl: true,
-      },
-      orderBy: { name: 'asc' },
-    });
+    };
   }
 
   async findOne(id: string) {
