@@ -102,4 +102,12 @@ export class CreateEventDto {
   @IsInt()
   @Min(0)
   pointsReward?: number;
+
+  @ApiPropertyOptional({
+    example: '/uploads/event-images/123.jpg',
+    description: 'URL from POST /events/upload-image',
+  })
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
 }

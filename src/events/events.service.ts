@@ -220,6 +220,7 @@ export class EventsService {
           ...(rest.pointsReward !== undefined
             ? { pointsReward: rest.pointsReward }
             : {}),
+          ...(rest.imageUrl !== undefined ? { imageUrl: rest.imageUrl } : {}),
         },
         include: eventInclude,
       });
@@ -666,6 +667,7 @@ export class EventsService {
       genders: event.genders,
       fee: event.fee,
       pointsReward: event.pointsReward,
+      imageUrl: event.imageUrl,
       createdBy: event.createdBy,
       schools: event.schools.map((s) => s.school),
       schoolIds: event.schools.map((s) => s.schoolId),

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -6,9 +7,18 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import * as Prisma from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -18,6 +28,10 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import {
+  eventImageFileFilter,
+  eventImageStorage,
+} from './event-image-upload.config';
 import { EventsService } from './events.service';
 
 @ApiTags('events')
@@ -32,6 +46,33 @@ export class EventsController {
   @ApiOperation({ summary: 'Create event as draft (admin)' })
   create(@Body() dto: CreateEventDto, @CurrentUser() user: Prisma.User) {
     return this.eventsService.create(dto, user.id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Post('upload-image')
+  @ApiOperation({ summary: 'Upload event cover image (admin)' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: eventImageStorage,
+      fileFilter: eventImageFileFilter,
+      limits: { fileSize: 5 * 1024 * 1024 },
+    }),
+  )
+  uploadImage(@UploadedFile() file?: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException('Event image file is required');
+    }
+    return { url: `/uploads/event-images/${file.filename}` };
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

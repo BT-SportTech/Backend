@@ -180,6 +180,7 @@ model Event {
   sport       String
   description String?
   venue       String
+  imageUrl    String?
 
   startsAt DateTime
   endsAt   DateTime?
