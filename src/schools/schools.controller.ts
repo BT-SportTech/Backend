@@ -69,10 +69,9 @@ export class SchoolsController {
     return { url: `/uploads/school-logos/${file.filename}` };
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get()
   @ApiOperation({
-    summary: 'List schools with pagination and filters',
+    summary: 'List schools with pagination and filters (public)',
     description:
       'Query params: page, limit, search, type, state, district, city, pincode, isActive',
   })
@@ -80,9 +79,8 @@ export class SchoolsController {
     return this.schoolsService.findAll(query);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiOperation({ summary: 'Get school by id' })
+  @ApiOperation({ summary: 'Get school by id (public)' })
   findOne(@Param('id') id: string) {
     return this.schoolsService.findOne(id);
   }

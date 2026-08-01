@@ -29,6 +29,26 @@ enum Gender {
   PREFER_NOT_TO_SAY
 }
 
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  COMPLETED
+  CANCELLED
+}
+
+enum AgeCategory {
+  U12
+  U14
+  U16
+  U18
+  OPEN
+}
+
+enum RegistrationStatus {
+  CONFIRMED
+  CANCELLED
+}
+
 // ─── School ──────────────────────────────────────────────────────────────────
 
 model School {
@@ -94,7 +114,8 @@ model School {
   certifications        String[]
 
   // Relations
-  students User[]
+  students     User[]
+  eventSchools EventSchool[]
 }
 
 // ─── User ─────────────────────────────────────────────────────────────────────
@@ -131,7 +152,9 @@ model User {
   company String?
 
   // Relations
-  refreshTokens RefreshToken[]
+  refreshTokens      RefreshToken[]
+  createdEvents      Event[]              @relation("EventCreator")
+  eventRegistrations EventRegistration[]
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────
@@ -144,4 +167,67 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime  @default(now())
   revokedAt DateTime?
+}
+
+// ─── Event ────────────────────────────────────────────────────────────────────
+
+model Event {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name        String
+  sport       String
+  description String?
+  venue       String
+
+  startsAt DateTime
+  endsAt   DateTime?
+
+  registrationOpensAt  DateTime
+  registrationClosesAt DateTime
+  maxParticipants      Int
+
+  status EventStatus @default(DRAFT)
+
+  // Zone
+  state    String
+  district String
+
+  ageCategory AgeCategory
+  genders     Gender[]
+
+  fee           Float @default(0)
+  pointsReward  Int   @default(50)
+
+  createdById String
+  createdBy   User   @relation("EventCreator", fields: [createdById], references: [id])
+
+  schools        EventSchool[]
+  registrations  EventRegistration[]
+}
+
+model EventSchool {
+  id       String @id @default(cuid())
+  eventId  String
+  schoolId String
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  school   School @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, schoolId])
+}
+
+model EventRegistration {
+  id           String             @id @default(cuid())
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  eventId      String
+  userId       String
+  status       RegistrationStatus @default(CONFIRMED)
+  registeredAt DateTime           @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
 }

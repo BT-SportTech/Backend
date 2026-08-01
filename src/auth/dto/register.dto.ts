@@ -41,7 +41,7 @@ export class RegisterDto {
   @ApiProperty({
     enum: ['STUDENT', 'PROFESSIONAL'],
     example: 'STUDENT',
-    description: 'STUDENT requires schoolId + presentClass; PROFESSIONAL requires company',
+    description: 'STUDENT requires schoolId; PROFESSIONAL requires company',
   })
   @IsEnum(['STUDENT', 'PROFESSIONAL'])
   role: 'STUDENT' | 'PROFESSIONAL';
@@ -96,9 +96,9 @@ export class RegisterDto {
     example: 10,
     minimum: 1,
     maximum: 12,
-    description: 'Required when role is STUDENT (class 1–12)',
+    description: 'Optional class 1–12 for students/players',
   })
-  @ValidateIf((o: RegisterDto) => o.role === 'STUDENT')
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(12)
