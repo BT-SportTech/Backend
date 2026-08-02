@@ -154,7 +154,15 @@ export class EventsService {
     }
 
     const school = await this.loadStudentSchool(user);
-    if (!this.isEligible(user, school, event)) {
+    const canFilterByEligibility = Boolean(
+      school &&
+        user.gender &&
+        user.dateOfBirth &&
+        school.state?.trim() &&
+        school.district?.trim(),
+    );
+    // Without profile/school data, allow viewing any published event.
+    if (canFilterByEligibility && !this.isEligible(user, school, event)) {
       throw new ForbiddenException('You are not eligible for this event.');
     }
 
@@ -330,9 +338,15 @@ export class EventsService {
       throw new ForbiddenException('Only students can list eligible events.');
     }
 
-    const school = this.requireStudentSchool(
-      user,
-      await this.loadStudentSchool(user),
+    // Soft profile: if school/gender/DOB are missing, show all published events
+    // instead of rejecting the request.
+    const school = await this.loadStudentSchool(user);
+    const canFilterByEligibility = Boolean(
+      school &&
+        user.gender &&
+        user.dateOfBirth &&
+        school.state?.trim() &&
+        school.district?.trim(),
     );
 
     const page = query.page ?? 1;
@@ -341,26 +355,31 @@ export class EventsService {
 
     const where: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
-      OR: [
-        {
-          AND: [{ state: null }, { district: null }],
-        },
-        ...(school.state && school.district
-          ? [
+      ...(canFilterByEligibility
+        ? {
+            OR: [
+              {
+                AND: [{ state: null }, { district: null }],
+              },
               {
                 AND: [
-                  { state: { equals: school.state, mode: 'insensitive' as const } },
+                  {
+                    state: {
+                      equals: school!.state!,
+                      mode: 'insensitive' as const,
+                    },
+                  },
                   {
                     district: {
-                      equals: school.district,
+                      equals: school!.district!,
                       mode: 'insensitive' as const,
                     },
                   },
                 ],
               },
-            ]
-          : []),
-      ],
+            ],
+          }
+        : {}),
       ...(query.sport
         ? { sport: { equals: query.sport, mode: 'insensitive' } }
         : {}),
@@ -385,7 +404,9 @@ export class EventsService {
       orderBy: { startsAt: 'asc' },
     });
 
-    const eligible = candidates.filter((e) => this.isEligible(user, school, e));
+    const eligible = canFilterByEligibility
+      ? candidates.filter((e) => this.isEligible(user, school, e))
+      : candidates;
 
     const registrations = await this.prisma.eventRegistration.findMany({
       where: {
