@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   MinLength,
@@ -24,24 +25,33 @@ export class RegisterDto {
   @IsNotEmpty()
   lastName: string;
 
-  @ApiProperty({ example: 'rahul@example.com' })
+  @ApiProperty({ example: 'rahul_07', description: 'Unique login username' })
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(3)
+  @Matches(/^[a-zA-Z0-9._]+$/, {
+    message: 'Username can only use letters, numbers, . and _',
+  })
+  username: string;
+
+  @ApiPropertyOptional({ example: 'rahul@example.com' })
+  @IsOptional()
   @IsEmail()
-  email: string;
+  email?: string;
 
   @ApiProperty({ example: 'Secret@123', minLength: 6 })
   @IsString()
   @MinLength(6)
   password: string;
 
-  @ApiPropertyOptional({ example: '9876543210' })
-  @IsOptional()
+  @ApiProperty({ example: '9876543210' })
   @IsString()
-  phone?: string;
+  @IsNotEmpty()
+  phone: string;
 
   @ApiProperty({
     enum: ['STUDENT', 'PROFESSIONAL'],
     example: 'STUDENT',
-    description: 'STUDENT requires schoolId; PROFESSIONAL requires company',
   })
   @IsEnum(['STUDENT', 'PROFESSIONAL'])
   role: 'STUDENT' | 'PROFESSIONAL';
@@ -85,11 +95,10 @@ export class RegisterDto {
 
   @ApiPropertyOptional({
     example: 'clxyz123schoolid',
-    description: 'Required when role is STUDENT — registered school id',
+    description: 'Optional registered school id for students',
   })
-  @ValidateIf((o: RegisterDto) => o.role === 'STUDENT')
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   schoolId?: string;
 
   @ApiPropertyOptional({

@@ -9,20 +9,24 @@ async function main() {
 
   const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@sporttech.com';
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'Admin@123';
+  const adminUsername = 'admin';
 
-  const existing = await prisma.user.findUnique({ where: { email: adminEmail } });
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email: adminEmail }, { username: adminUsername }] },
+  });
   if (!existing) {
     const passwordHash = await bcrypt.hash(adminPassword, 10);
     await prisma.user.create({
       data: {
         firstName: 'Super',
         lastName: 'Admin',
+        username: adminUsername,
         email: adminEmail,
         passwordHash,
         role: UserRole.ADMIN,
       },
     });
-    console.log(`Admin user created: ${adminEmail}`);
+    console.log(`Admin user created: ${adminUsername} / ${adminEmail}`);
   } else {
     console.log('Admin user already exists, skipping admin seed.');
   }

@@ -26,9 +26,15 @@ export class AuthController {
 
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verify registration OTP via 2Factor VERIFY' })
-  verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.otpService.verifyOtp(dto.phone, dto.sessionId, dto.otp);
+  @ApiOperation({ summary: 'Verify registration OTP and return profiles for phone' })
+  async verifyOtp(@Body() dto: VerifyOtpDto) {
+    const verified = await this.otpService.verifyOtp(
+      dto.phone,
+      dto.sessionId,
+      dto.otp,
+    );
+    const profiles = await this.authService.profilesForPhone(verified.phone);
+    return { ...verified, ...profiles };
   }
 
   @Post('register')
@@ -39,7 +45,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login with email and password' })
+  @ApiOperation({ summary: 'Login with username or email and password' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
   }
