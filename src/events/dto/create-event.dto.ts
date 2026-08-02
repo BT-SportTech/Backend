@@ -19,10 +19,13 @@ export class CreateEventDto {
   @MinLength(2)
   name: string;
 
-  @ApiProperty({ example: 'Football' })
+  @ApiProperty({
+    example: 'clxyzgameid',
+    description: 'ID of an active game from the Games catalog',
+  })
   @IsString()
-  @MinLength(2)
-  sport: string;
+  @MinLength(1)
+  gameId: string;
 
   @ApiPropertyOptional({ example: '5-a-side tournament for school teams.' })
   @IsOptional()
@@ -56,13 +59,21 @@ export class CreateEventDto {
   @Min(1)
   maxParticipants: number;
 
-  @ApiProperty({ example: 'Karnataka' })
+  @ApiPropertyOptional({
+    example: 'Karnataka',
+    description: 'Optional zone state. Empty with district = nationwide',
+  })
+  @IsOptional()
   @IsString()
-  state: string;
+  state?: string;
 
-  @ApiProperty({ example: 'Bengaluru Urban' })
+  @ApiPropertyOptional({
+    example: 'Bengaluru Urban',
+    description: 'Optional zone district. Empty with state = nationwide',
+  })
+  @IsOptional()
   @IsString()
-  district: string;
+  district?: string;
 
   @ApiProperty({ enum: AgeCategory, example: AgeCategory.U16 })
   @IsEnum(AgeCategory)
@@ -97,7 +108,10 @@ export class CreateEventDto {
   @Min(0)
   fee?: number;
 
-  @ApiPropertyOptional({ example: 50, default: 50 })
+  @ApiPropertyOptional({
+    example: 50,
+    description: 'Defaults to game.winPoints when omitted',
+  })
   @IsOptional()
   @IsInt()
   @Min(0)

@@ -169,6 +169,24 @@ model RefreshToken {
   revokedAt DateTime?
 }
 
+// ─── Game ─────────────────────────────────────────────────────────────────────
+
+model Game {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  name           String   @unique
+  imageUrl       String?
+  sidesPerMatch  Int      @default(2)
+  playersPerSide Int
+  winPoints      Int      @default(0)
+  lossPoints     Int      @default(0)
+  isActive       Boolean  @default(true)
+
+  events Event[]
+}
+
 // ─── Event ────────────────────────────────────────────────────────────────────
 
 model Event {
@@ -191,15 +209,18 @@ model Event {
 
   status EventStatus @default(DRAFT)
 
-  // Zone
-  state    String
-  district String
+  // Zone (optional — empty = nationwide)
+  state    String?
+  district String?
 
   ageCategory AgeCategory
   genders     Gender[]
 
   fee           Float @default(0)
   pointsReward  Int   @default(50)
+
+  gameId String?
+  game   Game?  @relation(fields: [gameId], references: [id])
 
   createdById String
   createdBy   User   @relation("EventCreator", fields: [createdById], references: [id])

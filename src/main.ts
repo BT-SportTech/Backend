@@ -38,6 +38,7 @@ async function bootstrap() {
     .addTag('schools')
     .addTag('users')
     .addTag('events')
+    .addTag('games')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);

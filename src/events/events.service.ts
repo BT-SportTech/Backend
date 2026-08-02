@@ -27,6 +27,7 @@ const eventInclude = {
   createdBy: {
     select: { id: true, firstName: true, lastName: true, email: true },
   },
+  game: true,
   _count: {
     select: {
       registrations: { where: { status: RegistrationStatus.CONFIRMED } },
@@ -47,26 +48,39 @@ export class EventsService {
       await this.assertSchoolsExist(dto.schoolIds);
     }
 
-    const { schoolIds, genders, fee, pointsReward, ...rest } = dto;
+    const game = await this.requireActiveGame(dto.gameId);
+    const { schoolIds, genders, fee, pointsReward, gameId, state, district, ...rest } =
+      dto;
 
-    return this.prisma.event.create({
-      data: {
-        ...rest,
-        startsAt: new Date(dto.startsAt),
-        endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
-        registrationOpensAt: new Date(dto.registrationOpensAt),
-        registrationClosesAt: new Date(dto.registrationClosesAt),
-        genders: genders ?? [],
-        fee: fee ?? 0,
-        pointsReward: pointsReward ?? 50,
-        status: EventStatus.DRAFT,
-        createdById: adminId,
-        schools: schoolIds?.length
-          ? { create: schoolIds.map((schoolId) => ({ schoolId })) }
-          : undefined,
-      },
-      include: eventInclude,
-    }).then((e) => this.toEventResponse(e));
+    return this.prisma.event
+      .create({
+        data: {
+          name: rest.name,
+          description: rest.description,
+          venue: rest.venue,
+          imageUrl: rest.imageUrl,
+          ageCategory: rest.ageCategory,
+          maxParticipants: rest.maxParticipants,
+          startsAt: new Date(dto.startsAt),
+          endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
+          registrationOpensAt: new Date(dto.registrationOpensAt),
+          registrationClosesAt: new Date(dto.registrationClosesAt),
+          genders: genders ?? [],
+          fee: fee ?? 0,
+          pointsReward: pointsReward ?? game.winPoints,
+          status: EventStatus.DRAFT,
+          createdById: adminId,
+          gameId: game.id,
+          sport: game.name,
+          state: this.normalizeZone(state),
+          district: this.normalizeZone(district),
+          schools: schoolIds?.length
+            ? { create: schoolIds.map((schoolId) => ({ schoolId })) }
+            : undefined,
+        },
+        include: eventInclude,
+      })
+      .then((e) => this.toEventResponse(e));
   }
 
   async findAllAdmin(query: EventQueryDto) {
@@ -174,6 +188,14 @@ export class EventsService {
       await this.assertSchoolsExist(dto.schoolIds);
     }
 
+    let gameSport: string | undefined;
+    let gameWinPoints: number | undefined;
+    if (dto.gameId) {
+      const game = await this.requireActiveGame(dto.gameId);
+      gameSport = game.name;
+      gameWinPoints = game.winPoints;
+    }
+
     const { schoolIds, ...rest } = dto;
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -190,7 +212,8 @@ export class EventsService {
         where: { id },
         data: {
           ...(rest.name !== undefined ? { name: rest.name } : {}),
-          ...(rest.sport !== undefined ? { sport: rest.sport } : {}),
+          ...(rest.gameId !== undefined ? { gameId: rest.gameId } : {}),
+          ...(gameSport !== undefined ? { sport: gameSport } : {}),
           ...(rest.description !== undefined
             ? { description: rest.description }
             : {}),
@@ -210,8 +233,12 @@ export class EventsService {
           ...(rest.maxParticipants !== undefined
             ? { maxParticipants: rest.maxParticipants }
             : {}),
-          ...(rest.state !== undefined ? { state: rest.state } : {}),
-          ...(rest.district !== undefined ? { district: rest.district } : {}),
+          ...(rest.state !== undefined
+            ? { state: this.normalizeZone(rest.state) }
+            : {}),
+          ...(rest.district !== undefined
+            ? { district: this.normalizeZone(rest.district) }
+            : {}),
           ...(rest.ageCategory !== undefined
             ? { ageCategory: rest.ageCategory }
             : {}),
@@ -219,7 +246,9 @@ export class EventsService {
           ...(rest.fee !== undefined ? { fee: rest.fee } : {}),
           ...(rest.pointsReward !== undefined
             ? { pointsReward: rest.pointsReward }
-            : {}),
+            : gameWinPoints !== undefined
+              ? { pointsReward: gameWinPoints }
+              : {}),
           ...(rest.imageUrl !== undefined ? { imageUrl: rest.imageUrl } : {}),
         },
         include: eventInclude,
@@ -312,17 +341,39 @@ export class EventsService {
 
     const where: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
-      state: { equals: school.state, mode: 'insensitive' },
-      district: { equals: school.district, mode: 'insensitive' },
+      OR: [
+        {
+          AND: [{ state: null }, { district: null }],
+        },
+        ...(school.state && school.district
+          ? [
+              {
+                AND: [
+                  { state: { equals: school.state, mode: 'insensitive' as const } },
+                  {
+                    district: {
+                      equals: school.district,
+                      mode: 'insensitive' as const,
+                    },
+                  },
+                ],
+              },
+            ]
+          : []),
+      ],
       ...(query.sport
         ? { sport: { equals: query.sport, mode: 'insensitive' } }
         : {}),
       ...(query.search
         ? {
-            OR: [
-              { name: { contains: query.search, mode: 'insensitive' } },
-              { sport: { contains: query.search, mode: 'insensitive' } },
-              { venue: { contains: query.search, mode: 'insensitive' } },
+            AND: [
+              {
+                OR: [
+                  { name: { contains: query.search, mode: 'insensitive' } },
+                  { sport: { contains: query.search, mode: 'insensitive' } },
+                  { venue: { contains: query.search, mode: 'insensitive' } },
+                ],
+              },
             ],
           }
         : {}),
@@ -564,12 +615,16 @@ export class EventsService {
         'Student date of birth is required for eligibility.',
       );
     }
-    if (!school.state || !school.district) {
+    if (!school.state?.trim() || !school.district?.trim()) {
       throw new BadRequestException(
-        'School zone (state and district) must be set.',
+        'Student school must have state and district set.',
       );
     }
-    return { id: school.id, state: school.state, district: school.district };
+    return {
+      id: school.id,
+      state: school.state,
+      district: school.district,
+    };
   }
 
   private isEligible(
@@ -583,11 +638,14 @@ export class EventsService {
   ): boolean {
     if (!school || !user.gender || !user.dateOfBirth) return false;
 
-    if (
-      school.state?.toLowerCase() !== event.state.toLowerCase() ||
-      school.district?.toLowerCase() !== event.district.toLowerCase()
-    ) {
-      return false;
+    const eventHasZone = Boolean(event.state?.trim() && event.district?.trim());
+    if (eventHasZone) {
+      if (
+        school.state?.toLowerCase() !== event.state!.toLowerCase() ||
+        school.district?.toLowerCase() !== event.district!.toLowerCase()
+      ) {
+        return false;
+      }
     }
 
     if (event.genders.length > 0 && !event.genders.includes(user.gender)) {
@@ -643,6 +701,48 @@ export class EventsService {
     return !!reg;
   }
 
+  private async requireActiveGame(gameId: string) {
+    const game = await this.prisma.game.findFirst({
+      where: { id: gameId, isActive: true },
+    });
+    if (!game) {
+      throw new BadRequestException('Invalid or inactive game.');
+    }
+    return game;
+  }
+
+  private normalizeZone(value?: string | null): string | null {
+    if (value === undefined || value === null) return null;
+    const trimmed = value.trim();
+    return trimmed.length ? trimmed : null;
+  }
+
+  private toGameResponse(
+    game: {
+      id: string;
+      name: string;
+      imageUrl: string | null;
+      sidesPerMatch: number;
+      playersPerSide: number;
+      winPoints: number;
+      lossPoints: number;
+      isActive: boolean;
+    } | null,
+  ) {
+    if (!game) return null;
+    return {
+      id: game.id,
+      name: game.name,
+      imageUrl: game.imageUrl,
+      sidesPerMatch: game.sidesPerMatch,
+      playersPerSide: game.playersPerSide,
+      playersPerMatch: game.sidesPerMatch * game.playersPerSide,
+      winPoints: game.winPoints,
+      lossPoints: game.lossPoints,
+      isActive: game.isActive,
+    };
+  }
+
   private toEventResponse(event: EventWithRelations, isRegistered?: boolean) {
     const registeredCount = event._count.registrations;
     return {
@@ -651,6 +751,8 @@ export class EventsService {
       updatedAt: event.updatedAt,
       name: event.name,
       sport: event.sport,
+      gameId: event.gameId,
+      game: this.toGameResponse(event.game),
       description: event.description,
       venue: event.venue,
       startsAt: event.startsAt,

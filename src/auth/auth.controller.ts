@@ -5,11 +5,31 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { OtpService } from './otp.service';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly otpService: OtpService,
+  ) {}
+
+  @Post('otp/send')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send registration OTP via 2Factor AUTOGEN' })
+  sendOtp(@Body() dto: SendOtpDto) {
+    return this.otpService.sendOtp(dto.phone, dto.template);
+  }
+
+  @Post('otp/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify registration OTP via 2Factor VERIFY' })
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.otpService.verifyOtp(dto.phone, dto.sessionId, dto.otp);
+  }
 
   @Post('register')
   @ApiOperation({ summary: 'Register a student or professional player' })

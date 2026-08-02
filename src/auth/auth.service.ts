@@ -12,6 +12,7 @@ import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { OtpService } from './otp.service';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +20,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
+    private readonly otp: OtpService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -37,6 +39,14 @@ export class AuthService {
       if (!school) throw new BadRequestException('Invalid or inactive school.');
     }
 
+    let normalizedPhone = dto.phone;
+    if (dto.phone) {
+      if (!this.otp.isPhoneVerified(dto.phone)) {
+        throw new BadRequestException('Phone number must be verified with OTP before registration.');
+      }
+      normalizedPhone = this.otp.normalizePhone(dto.phone);
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
     const user = await this.prisma.user.create({
@@ -44,7 +54,7 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         email: dto.email,
-        phone: dto.phone,
+        phone: normalizedPhone,
         passwordHash,
         role: dto.role,
         gender: dto.gender,
