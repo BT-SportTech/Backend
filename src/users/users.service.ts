@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, User } from '@prisma/client';
+import { MatchOutcome, Prisma, RegistrationStatus, User } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_PROFILES_PER_PHONE } from '../auth/profile.constants';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -22,6 +22,61 @@ export class UsersService {
         user.dateOfBirth &&
         (user.city?.trim() || user.state?.trim()),
     );
+  }
+
+  async myStats(user: User) {
+    const rows = await this.prisma.eventRegistration.findMany({
+      where: {
+        userId: user.id,
+        status: RegistrationStatus.CONFIRMED,
+        outcome: { not: null },
+      },
+      include: {
+        event: { select: { sport: true } },
+      },
+    });
+
+    type Bucket = {
+      sport: string;
+      played: number;
+      won: number;
+      lost: number;
+      draw: number;
+      points: number;
+    };
+
+    const bySportMap = new Map<string, Bucket>();
+    const totals = { played: 0, won: 0, lost: 0, draw: 0, points: 0 };
+
+    for (const row of rows) {
+      const sport = row.event.sport?.trim() || 'Other';
+      let bucket = bySportMap.get(sport);
+      if (!bucket) {
+        bucket = { sport, played: 0, won: 0, lost: 0, draw: 0, points: 0 };
+        bySportMap.set(sport, bucket);
+      }
+      bucket.played += 1;
+      totals.played += 1;
+      bucket.points += row.pointsEarned;
+      totals.points += row.pointsEarned;
+
+      if (row.outcome === MatchOutcome.WIN) {
+        bucket.won += 1;
+        totals.won += 1;
+      } else if (row.outcome === MatchOutcome.LOSS) {
+        bucket.lost += 1;
+        totals.lost += 1;
+      } else if (row.outcome === MatchOutcome.DRAW) {
+        bucket.draw += 1;
+        totals.draw += 1;
+      }
+    }
+
+    const bySport = [...bySportMap.values()].sort((a, b) =>
+      b.points !== a.points ? b.points - a.points : a.sport.localeCompare(b.sport),
+    );
+
+    return { totals, bySport };
   }
 
   async me(user: User) {

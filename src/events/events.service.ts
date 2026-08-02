@@ -8,6 +8,7 @@ import {
 import {
   AgeCategory,
   EventStatus,
+  MatchOutcome,
   Prisma,
   RegistrationStatus,
   User,
@@ -16,6 +17,8 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
+import { SetEventResultsDto } from './dto/set-event-results.dto';
+import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 
 const eventInclude = {
@@ -315,6 +318,156 @@ export class EventsService {
     return this.toEventResponse(updated);
   }
 
+  /** Bulk-set outcomes for confirmed registrations and mark event COMPLETED. */
+  async setResults(eventId: string, dto: SetEventResultsDto) {
+    const event = await this.getEventOrThrow(eventId);
+    if (
+      event.status !== EventStatus.PUBLISHED &&
+      event.status !== EventStatus.COMPLETED
+    ) {
+      throw new BadRequestException(
+        'Results can only be set for published or completed events.',
+      );
+    }
+
+    const confirmed = await this.prisma.eventRegistration.findMany({
+      where: { eventId, status: RegistrationStatus.CONFIRMED },
+    });
+    const byUser = new Map(confirmed.map((r) => [r.userId, r]));
+
+    for (const item of dto.results) {
+      if (!byUser.has(item.userId)) {
+        throw new BadRequestException(
+          `User ${item.userId} is not a confirmed registrant.`,
+        );
+      }
+    }
+
+    const winPts = event.pointsReward;
+    const lossPts = event.game?.lossPoints ?? 0;
+    const drawPts = Math.floor(winPts / 2);
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of dto.results) {
+        const pointsEarned =
+          item.outcome === MatchOutcome.WIN
+            ? winPts
+            : item.outcome === MatchOutcome.LOSS
+              ? lossPts
+              : drawPts;
+        await tx.eventRegistration.update({
+          where: {
+            eventId_userId: { eventId, userId: item.userId },
+          },
+          data: { outcome: item.outcome, pointsEarned },
+        });
+      }
+      if (event.status !== EventStatus.COMPLETED) {
+        await tx.event.update({
+          where: { id: eventId },
+          data: { status: EventStatus.COMPLETED },
+        });
+      }
+    });
+
+    return this.listRegistrationsAdmin(eventId);
+  }
+
+  async setRegistrationResult(
+    eventId: string,
+    registrationId: string,
+    dto: SetRegistrationResultDto,
+  ) {
+    const event = await this.getEventOrThrow(eventId);
+    if (
+      event.status !== EventStatus.PUBLISHED &&
+      event.status !== EventStatus.COMPLETED
+    ) {
+      throw new BadRequestException(
+        'Results can only be set for published or completed events.',
+      );
+    }
+
+    const registration = await this.prisma.eventRegistration.findFirst({
+      where: {
+        id: registrationId,
+        eventId,
+        status: RegistrationStatus.CONFIRMED,
+      },
+    });
+    if (!registration) {
+      throw new NotFoundException('Registration not found for this event.');
+    }
+
+    const winPts = event.pointsReward;
+    const lossPts = event.game?.lossPoints ?? 0;
+    const drawPts = Math.floor(winPts / 2);
+    const pointsEarned =
+      dto.outcome === MatchOutcome.WIN
+        ? winPts
+        : dto.outcome === MatchOutcome.LOSS
+          ? lossPts
+          : drawPts;
+
+    const updated = await this.prisma.eventRegistration.update({
+      where: { id: registrationId },
+      data: { outcome: dto.outcome, pointsEarned },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: updated.id,
+      userId: updated.userId,
+      status: updated.status,
+      outcome: updated.outcome,
+      pointsEarned: updated.pointsEarned,
+      registeredAt: updated.registeredAt,
+      user: updated.user,
+    };
+  }
+
+  async listRegistrationsAdmin(eventId: string) {
+    await this.getEventOrThrow(eventId);
+    const rows = await this.prisma.eventRegistration.findMany({
+      where: { eventId, status: RegistrationStatus.CONFIRMED },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: { registeredAt: 'asc' },
+    });
+
+    return {
+      eventId,
+      data: rows.map((r) => ({
+        id: r.id,
+        userId: r.userId,
+        status: r.status,
+        outcome: r.outcome,
+        pointsEarned: r.pointsEarned,
+        registeredAt: r.registeredAt,
+        user: r.user,
+      })),
+    };
+  }
+
   async cancel(id: string) {
     const event = await this.getEventOrThrow(id);
     if (
@@ -548,6 +701,8 @@ export class EventsService {
         id: r.id,
         status: r.status,
         registeredAt: r.registeredAt,
+        outcome: r.outcome,
+        pointsEarned: r.pointsEarned,
         event: this.toEventResponse(r.event, true),
       })),
       meta: {

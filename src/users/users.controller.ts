@@ -23,6 +23,12 @@ export class UsersController {
     return this.usersService.me(user);
   }
 
+  @Get('me/stats')
+  @ApiOperation({ summary: 'Get current user sports stats (played/won/lost/points)' })
+  myStats(@CurrentUser() user: Prisma.User) {
+    return this.usersService.myStats(user);
+  }
+
   @Patch('me')
   @ApiOperation({ summary: 'Update current user profile' })
   updateMe(@CurrentUser() user: Prisma.User, @Body() dto: UpdateUserDto) {

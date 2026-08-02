@@ -49,6 +49,12 @@ enum RegistrationStatus {
   CANCELLED
 }
 
+enum MatchOutcome {
+  WIN
+  LOSS
+  DRAW
+}
+
 // ─── School ──────────────────────────────────────────────────────────────────
 
 model School {
@@ -248,6 +254,8 @@ model EventRegistration {
   userId       String
   status       RegistrationStatus @default(CONFIRMED)
   registeredAt DateTime           @default(now())
+  outcome      MatchOutcome?
+  pointsEarned Int                @default(0)
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)

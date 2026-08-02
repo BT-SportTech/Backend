@@ -27,6 +27,8 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
+import { SetEventResultsDto } from './dto/set-event-results.dto';
+import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import {
   eventImageFileFilter,
@@ -116,6 +118,14 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
+  @Get(':id/registrations')
+  @ApiOperation({ summary: 'List confirmed registrations for an event (admin)' })
+  listRegistrations(@Param('id') id: string) {
+    return this.eventsService.listRegistrationsAdmin(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Patch(':id')
   @ApiOperation({ summary: 'Update event (admin)' })
   update(@Param('id') id: string, @Body() dto: UpdateEventDto) {
@@ -136,6 +146,28 @@ export class EventsController {
   @ApiOperation({ summary: 'Mark event completed (admin)' })
   complete(@Param('id') id: string) {
     return this.eventsService.complete(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Post(':id/results')
+  @ApiOperation({
+    summary: 'Set match outcomes for registrants and mark event completed',
+  })
+  setResults(@Param('id') id: string, @Body() dto: SetEventResultsDto) {
+    return this.eventsService.setResults(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/registrations/:registrationId/result')
+  @ApiOperation({ summary: 'Set outcome for a single registration (admin)' })
+  setRegistrationResult(
+    @Param('id') id: string,
+    @Param('registrationId') registrationId: string,
+    @Body() dto: SetRegistrationResultDto,
+  ) {
+    return this.eventsService.setRegistrationResult(id, registrationId, dto);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
