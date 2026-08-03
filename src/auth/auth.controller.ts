@@ -19,7 +19,7 @@ export class AuthController {
 
   @Post('otp/send')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Send registration OTP via 2Factor AUTOGEN' })
+  @ApiOperation({ summary: 'Send registration OTP via SMS only (2Factor SMS API)' })
   sendOtp(@Body() dto: SendOtpDto) {
     return this.otpService.sendOtp(dto.phone, dto.template);
   }
