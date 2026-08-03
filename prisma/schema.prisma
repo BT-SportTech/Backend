@@ -20,6 +20,7 @@ enum UserRole {
   PLAYER
   PROFESSIONAL
   ADMIN
+  ORGANIZER
 }
 
 enum Gender {
@@ -159,9 +160,12 @@ model User {
   company String?
 
   // Relations
-  refreshTokens      RefreshToken[]
-  createdEvents      Event[]              @relation("EventCreator")
-  eventRegistrations EventRegistration[]
+  refreshTokens       RefreshToken[]
+  createdEvents       Event[]              @relation("EventCreator")
+  eventRegistrations  EventRegistration[]
+  organizedEvents     EventOrganizer[]
+  organizerInvites    OrganizerInvite[]    @relation("InviteCreator")
+  attendanceMarked    EventRegistration[]  @relation("AttendanceMarker")
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────
@@ -234,6 +238,32 @@ model Event {
 
   schools        EventSchool[]
   registrations  EventRegistration[]
+  organizers     EventOrganizer[]
+}
+
+model EventOrganizer {
+  id       String @id @default(cuid())
+  eventId  String
+  userId   String
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+}
+
+model OrganizerInvite {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  email       String
+  firstName   String
+  lastName    String
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  invitedById String
+  invitedBy   User      @relation("InviteCreator", fields: [invitedById], references: [id])
+
+  @@index([email])
 }
 
 model EventSchool {
@@ -256,6 +286,10 @@ model EventRegistration {
   registeredAt DateTime           @default(now())
   outcome      MatchOutcome?
   pointsEarned Int                @default(0)
+
+  attendedAt   DateTime?
+  attendedById String?
+  attendedBy   User?              @relation("AttendanceMarker", fields: [attendedById], references: [id])
 
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)

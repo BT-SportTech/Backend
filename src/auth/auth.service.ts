@@ -50,8 +50,11 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    if ((dto.role as string) === UserRole.ADMIN) {
-      throw new ForbiddenException('Cannot self-register as admin.');
+    if (
+      (dto.role as string) === UserRole.ADMIN ||
+      (dto.role as string) === UserRole.ORGANIZER
+    ) {
+      throw new ForbiddenException('Cannot self-register as admin or organizer.');
     }
 
     if (dto.role === UserRole.PLAYER && dto.schoolId) {
@@ -159,6 +162,11 @@ export class AuthService {
       where: { tokenHash, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+  }
+
+  async issueTokensForUser(user: User) {
+    const tokens = await this.generateTokens(user);
+    return { ...tokens, user: this.sanitize(user) };
   }
 
   private async generateTokens(user: User) {

@@ -27,6 +27,19 @@ const eventInclude = {
       school: { select: { id: true, name: true, code: true } },
     },
   },
+  organizers: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          username: true,
+        },
+      },
+    },
+  },
   createdBy: {
     select: { id: true, firstName: true, lastName: true, email: true },
   },
@@ -50,10 +63,22 @@ export class EventsService {
     if (dto.schoolIds?.length) {
       await this.assertSchoolsExist(dto.schoolIds);
     }
+    if (dto.organizerIds?.length) {
+      await this.assertOrganizersExist(dto.organizerIds);
+    }
 
     const game = await this.requireActiveGame(dto.gameId);
-    const { schoolIds, genders, fee, pointsReward, gameId, state, district, ...rest } =
-      dto;
+    const {
+      schoolIds,
+      organizerIds,
+      genders,
+      fee,
+      pointsReward,
+      gameId,
+      state,
+      district,
+      ...rest
+    } = dto;
 
     return this.prisma.event
       .create({
@@ -79,6 +104,9 @@ export class EventsService {
           district: this.normalizeZone(district),
           schools: schoolIds?.length
             ? { create: schoolIds.map((schoolId) => ({ schoolId })) }
+            : undefined,
+          organizers: organizerIds?.length
+            ? { create: organizerIds.map((userId) => ({ userId })) }
             : undefined,
         },
         include: eventInclude,
@@ -148,6 +176,14 @@ export class EventsService {
       return this.toEventResponse(event);
     }
 
+    if (user.role === UserRole.ORGANIZER) {
+      const assigned = event.organizers.some((o) => o.userId === user.id);
+      if (!assigned) {
+        throw new ForbiddenException('You are not assigned to this event.');
+      }
+      return this.toEventResponse(event);
+    }
+
     if (user.role !== UserRole.PLAYER) {
       throw new ForbiddenException('Only players and admins can view events.');
     }
@@ -185,6 +221,9 @@ export class EventsService {
     if (dto.schoolIds?.length) {
       await this.assertSchoolsExist(dto.schoolIds);
     }
+    if (dto.organizerIds?.length) {
+      await this.assertOrganizersExist(dto.organizerIds);
+    }
 
     let gameSport: string | undefined;
     let gameWinPoints: number | undefined;
@@ -194,7 +233,7 @@ export class EventsService {
       gameWinPoints = game.winPoints;
     }
 
-    const { schoolIds, ...rest } = dto;
+    const { schoolIds, organizerIds, ...rest } = dto;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (schoolIds !== undefined) {
@@ -202,6 +241,15 @@ export class EventsService {
         if (schoolIds.length) {
           await tx.eventSchool.createMany({
             data: schoolIds.map((schoolId) => ({ eventId: id, schoolId })),
+          });
+        }
+      }
+
+      if (organizerIds !== undefined) {
+        await tx.eventOrganizer.deleteMany({ where: { eventId: id } });
+        if (organizerIds.length) {
+          await tx.eventOrganizer.createMany({
+            data: organizerIds.map((userId) => ({ eventId: id, userId })),
           });
         }
       }
@@ -425,6 +473,112 @@ export class EventsService {
 
   async listRegistrationsAdmin(eventId: string) {
     await this.getEventOrThrow(eventId);
+    return this.listRegistrations(eventId);
+  }
+
+  async listRegistrationsForUser(eventId: string, user: User) {
+    await this.getEventOrThrow(eventId);
+    if (user.role === UserRole.ADMIN) {
+      return this.listRegistrations(eventId);
+    }
+    if (user.role === UserRole.ORGANIZER) {
+      await this.assertOrganizerAssigned(eventId, user.id);
+      return this.listRegistrations(eventId);
+    }
+    throw new ForbiddenException('Not allowed to view registrations.');
+  }
+
+  async findMineForOrganizer(user: User) {
+    if (user.role !== UserRole.ORGANIZER) {
+      throw new ForbiddenException('Only organizers can list assigned events.');
+    }
+
+    const rows = await this.prisma.event.findMany({
+      where: {
+        status: EventStatus.PUBLISHED,
+        organizers: { some: { userId: user.id } },
+      },
+      include: eventInclude,
+      orderBy: { startsAt: 'asc' },
+    });
+
+    return {
+      data: rows.map((e) => this.toEventResponse(e)),
+    };
+  }
+
+  async setAttendance(
+    eventId: string,
+    registrationId: string,
+    attended: boolean,
+    user: User,
+  ) {
+    const event = await this.getEventOrThrow(eventId);
+
+    if (user.role === UserRole.ORGANIZER) {
+      await this.assertOrganizerAssigned(eventId, user.id);
+    } else if (user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Not allowed to mark attendance.');
+    }
+
+    if (event.status !== EventStatus.PUBLISHED) {
+      throw new BadRequestException(
+        'Attendance can only be marked for published events.',
+      );
+    }
+
+    this.assertAttendanceWindow(event.startsAt);
+
+    const registration = await this.prisma.eventRegistration.findFirst({
+      where: {
+        id: registrationId,
+        eventId,
+        status: RegistrationStatus.CONFIRMED,
+      },
+    });
+    if (!registration) {
+      throw new NotFoundException('Registration not found for this event.');
+    }
+
+    const updated = await this.prisma.eventRegistration.update({
+      where: { id: registrationId },
+      data: attended
+        ? { attendedAt: new Date(), attendedById: user.id }
+        : { attendedAt: null, attendedById: null },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            username: true,
+            email: true,
+          },
+        },
+        attendedBy: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+
+    return {
+      id: updated.id,
+      userId: updated.userId,
+      status: updated.status,
+      outcome: updated.outcome,
+      pointsEarned: updated.pointsEarned,
+      registeredAt: updated.registeredAt,
+      attendedAt: updated.attendedAt,
+      attendedById: updated.attendedById,
+      attendedBy: updated.attendedBy,
+      user: updated.user,
+    };
+  }
+
+  private async listRegistrations(eventId: string) {
+    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    if (!event) throw new NotFoundException('Event not found.');
+
     const rows = await this.prisma.eventRegistration.findMany({
       where: { eventId, status: RegistrationStatus.CONFIRMED },
       include: {
@@ -436,6 +590,9 @@ export class EventsService {
             username: true,
             email: true,
           },
+        },
+        attendedBy: {
+          select: { id: true, firstName: true, lastName: true },
         },
       },
       orderBy: { registeredAt: 'asc' },
@@ -450,9 +607,52 @@ export class EventsService {
         outcome: r.outcome,
         pointsEarned: r.pointsEarned,
         registeredAt: r.registeredAt,
+        attendedAt: r.attendedAt,
+        attendedById: r.attendedById,
+        attendedBy: r.attendedBy,
         user: r.user,
       })),
+      attendanceWindowOpen: this.isAttendanceWindowOpen(
+        event.startsAt,
+        event.status,
+      ),
+      attendanceOpensAt: new Date(event.startsAt.getTime() - 30 * 60 * 1000),
     };
+  }
+
+  private async assertOrganizerAssigned(eventId: string, userId: string) {
+    const assignment = await this.prisma.eventOrganizer.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+    });
+    if (!assignment) {
+      throw new ForbiddenException('You are not assigned to this event.');
+    }
+  }
+
+  private async assertOrganizersExist(organizerIds: string[]) {
+    const found = await this.prisma.user.findMany({
+      where: { id: { in: organizerIds }, role: UserRole.ORGANIZER },
+      select: { id: true },
+    });
+    if (found.length !== organizerIds.length) {
+      throw new BadRequestException(
+        'One or more organizer IDs are invalid or not organizers.',
+      );
+    }
+  }
+
+  private assertAttendanceWindow(startsAt: Date) {
+    if (!this.isAttendanceWindowOpen(startsAt, EventStatus.PUBLISHED)) {
+      throw new BadRequestException(
+        'Attendance opens 30 minutes before the event starts.',
+      );
+    }
+  }
+
+  private isAttendanceWindowOpen(startsAt: Date, status: EventStatus) {
+    if (status !== EventStatus.PUBLISHED) return false;
+    const opensAt = new Date(startsAt.getTime() - 30 * 60 * 1000);
+    return new Date() >= opensAt;
   }
 
   async cancel(id: string) {
@@ -904,6 +1104,13 @@ export class EventsService {
       createdBy: event.createdBy,
       schools: event.schools.map((s) => s.school),
       schoolIds: event.schools.map((s) => s.schoolId),
+      organizers: event.organizers.map((o) => o.user),
+      organizerIds: event.organizers.map((o) => o.userId),
+      attendanceWindowOpen: this.isAttendanceWindowOpen(
+        event.startsAt,
+        event.status,
+      ),
+      attendanceOpensAt: new Date(event.startsAt.getTime() - 30 * 60 * 1000),
       ...(isRegistered !== undefined ? { isRegistered } : {}),
     };
   }

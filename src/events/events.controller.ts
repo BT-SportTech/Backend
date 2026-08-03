@@ -27,6 +27,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
+import { SetAttendanceDto } from './dto/set-attendance.dto';
 import { SetEventResultsDto } from './dto/set-event-results.dto';
 import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -109,19 +110,52 @@ export class EventsController {
     return this.eventsService.myRegistrations(user, query);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ORGANIZER)
+  @Get('organizer/mine')
+  @ApiOperation({ summary: 'List published events assigned to the organizer' })
+  organizerMine(@CurrentUser() user: Prisma.User) {
+    return this.eventsService.findMineForOrganizer(user);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiOperation({ summary: 'Get event detail (admin or eligible player)' })
+  @ApiOperation({ summary: 'Get event detail (admin, organizer, or eligible player)' })
   findOne(@Param('id') id: string, @CurrentUser() user: Prisma.User) {
     return this.eventsService.findOne(id, user);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.ADMIN)
+  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
   @Get(':id/registrations')
-  @ApiOperation({ summary: 'List confirmed registrations for an event (admin)' })
-  listRegistrations(@Param('id') id: string) {
-    return this.eventsService.listRegistrationsAdmin(id);
+  @ApiOperation({
+    summary: 'List confirmed registrations (admin or assigned organizer)',
+  })
+  listRegistrations(
+    @Param('id') id: string,
+    @CurrentUser() user: Prisma.User,
+  ) {
+    return this.eventsService.listRegistrationsForUser(id, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.ORGANIZER)
+  @Patch(':id/registrations/:registrationId/attendance')
+  @ApiOperation({
+    summary: 'Mark or clear player attendance (admin or assigned organizer)',
+  })
+  setAttendance(
+    @Param('id') id: string,
+    @Param('registrationId') registrationId: string,
+    @Body() dto: SetAttendanceDto,
+    @CurrentUser() user: Prisma.User,
+  ) {
+    return this.eventsService.setAttendance(
+      id,
+      registrationId,
+      dto.attended,
+      user,
+    );
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

@@ -124,4 +124,15 @@ export class CreateEventDto {
   @IsOptional()
   @IsString()
   imageUrl?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Organizer user IDs to assign to this event',
+    example: [],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsString({ each: true })
+  organizerIds?: string[];
 }

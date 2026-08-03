@@ -31,6 +31,40 @@ async function main() {
     console.log('Admin user already exists, skipping admin seed.');
   }
 
+  const organizerEmail =
+    process.env.ORGANIZER_EMAIL ?? 'organiser@sporttech.com';
+  const organizerPassword = process.env.ORGANIZER_PASSWORD ?? 'Organiser@123';
+  const organizerUsername = 'organiser';
+
+  const existingOrganizer = await prisma.user.findFirst({
+    where: {
+      OR: [{ email: organizerEmail }, { username: organizerUsername }],
+    },
+  });
+  if (!existingOrganizer) {
+    const passwordHash = await bcrypt.hash(organizerPassword, 10);
+    await prisma.user.create({
+      data: {
+        firstName: 'Demo',
+        lastName: 'Organiser',
+        username: organizerUsername,
+        email: organizerEmail,
+        passwordHash,
+        role: UserRole.ORGANIZER,
+        sportsInterested: [],
+      },
+    });
+    console.log(
+      `Organizer user created: ${organizerUsername} / ${organizerEmail}`,
+    );
+  } else if (existingOrganizer.role !== UserRole.ORGANIZER) {
+    console.log(
+      `User ${existingOrganizer.username} exists but is not ORGANIZER — skipping organizer seed.`,
+    );
+  } else {
+    console.log('Organizer user already exists, skipping organizer seed.');
+  }
+
   const starters = [
     { name: 'Chess', sidesPerMatch: 2, playersPerSide: 1, winPoints: 50, lossPoints: 10 },
     { name: 'Table Tennis', sidesPerMatch: 2, playersPerSide: 1, winPoints: 40, lossPoints: 8 },
