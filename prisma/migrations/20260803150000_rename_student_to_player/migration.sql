@@ -1,0 +1,2 @@
+-- Rename UserRole enum value STUDENT → PLAYER
+ALTER TYPE "UserRole" RENAME VALUE 'STUDENT' TO 'PLAYER';

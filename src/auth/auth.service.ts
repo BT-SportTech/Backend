@@ -54,7 +54,7 @@ export class AuthService {
       throw new ForbiddenException('Cannot self-register as admin.');
     }
 
-    if (dto.role === UserRole.STUDENT && dto.schoolId) {
+    if (dto.role === UserRole.PLAYER && dto.schoolId) {
       const school = await this.prisma.school.findFirst({
         where: { id: dto.schoolId, isActive: true },
       });
@@ -107,8 +107,8 @@ export class AuthService {
         city: dto.city,
         pincode: dto.pincode,
         sportsInterested: dto.sportsInterested ?? [],
-        schoolId: dto.role === UserRole.STUDENT ? dto.schoolId : undefined,
-        presentClass: dto.role === UserRole.STUDENT ? dto.presentClass : undefined,
+        schoolId: dto.role === UserRole.PLAYER ? dto.schoolId : undefined,
+        presentClass: dto.role === UserRole.PLAYER ? dto.presentClass : undefined,
         company: dto.role === UserRole.PROFESSIONAL ? dto.company : undefined,
       },
     });

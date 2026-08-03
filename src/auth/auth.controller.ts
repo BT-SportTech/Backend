@@ -38,7 +38,7 @@ export class AuthController {
   }
 
   @Post('register')
-  @ApiOperation({ summary: 'Register a student or professional player' })
+  @ApiOperation({ summary: 'Register a player or professional' })
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }

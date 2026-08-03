@@ -50,11 +50,11 @@ export class RegisterDto {
   phone: string;
 
   @ApiProperty({
-    enum: ['STUDENT', 'PROFESSIONAL'],
-    example: 'STUDENT',
+    enum: ['PLAYER', 'PROFESSIONAL'],
+    example: 'PLAYER',
   })
-  @IsEnum(['STUDENT', 'PROFESSIONAL'])
-  role: 'STUDENT' | 'PROFESSIONAL';
+  @IsEnum(['PLAYER', 'PROFESSIONAL'])
+  role: 'PLAYER' | 'PROFESSIONAL';
 
   @ApiPropertyOptional({ enum: Gender, example: Gender.MALE })
   @IsOptional()
@@ -95,7 +95,7 @@ export class RegisterDto {
 
   @ApiPropertyOptional({
     example: 'clxyz123schoolid',
-    description: 'Optional registered school id for students',
+    description: 'Optional registered school id for players',
   })
   @IsOptional()
   @IsString()
@@ -105,7 +105,7 @@ export class RegisterDto {
     example: 10,
     minimum: 1,
     maximum: 12,
-    description: 'Optional class 1–12 for students/players',
+    description: 'Optional class 1–12 for players',
   })
   @IsOptional()
   @IsInt()

@@ -148,25 +148,12 @@ export class EventsService {
       return this.toEventResponse(event);
     }
 
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students and admins can view events.');
+    if (user.role !== UserRole.PLAYER) {
+      throw new ForbiddenException('Only players and admins can view events.');
     }
 
     if (event.status !== EventStatus.PUBLISHED) {
       throw new ForbiddenException('Event is not available.');
-    }
-
-    const school = await this.loadStudentSchool(user);
-    const canFilterByEligibility = Boolean(
-      school &&
-        user.gender &&
-        user.dateOfBirth &&
-        school.state?.trim() &&
-        school.district?.trim(),
-    );
-    // Without profile/school data, allow viewing any published event.
-    if (canFilterByEligibility && !this.isEligible(user, school, event)) {
-      throw new ForbiddenException('You are not eligible for this event.');
     }
 
     const isRegistered = await this.isUserRegistered(event.id, user.id);
@@ -487,52 +474,17 @@ export class EventsService {
   }
 
   async findEligible(user: User, query: EventQueryDto) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can list eligible events.');
+    if (user.role !== UserRole.PLAYER) {
+      throw new ForbiddenException('Only players can list eligible events.');
     }
 
-    // Soft profile: if school/gender/DOB are missing, show all published events
-    // instead of rejecting the request.
-    const school = await this.loadStudentSchool(user);
-    const canFilterByEligibility = Boolean(
-      school &&
-        user.gender &&
-        user.dateOfBirth &&
-        school.state?.trim() &&
-        school.district?.trim(),
-    );
-
+    // Show all published events; eligibility is enforced at registration.
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
 
     const where: Prisma.EventWhereInput = {
       status: EventStatus.PUBLISHED,
-      ...(canFilterByEligibility
-        ? {
-            OR: [
-              {
-                AND: [{ state: null }, { district: null }],
-              },
-              {
-                AND: [
-                  {
-                    state: {
-                      equals: school!.state!,
-                      mode: 'insensitive' as const,
-                    },
-                  },
-                  {
-                    district: {
-                      equals: school!.district!,
-                      mode: 'insensitive' as const,
-                    },
-                  },
-                ],
-              },
-            ],
-          }
-        : {}),
       ...(query.sport
         ? { sport: { equals: query.sport, mode: 'insensitive' } }
         : {}),
@@ -551,31 +503,29 @@ export class EventsService {
         : {}),
     };
 
-    const candidates = await this.prisma.event.findMany({
-      where,
-      include: eventInclude,
-      orderBy: { startsAt: 'asc' },
-    });
-
-    const eligible = canFilterByEligibility
-      ? candidates.filter((e) => this.isEligible(user, school, e))
-      : candidates;
+    const [candidates, total] = await Promise.all([
+      this.prisma.event.findMany({
+        where,
+        include: eventInclude,
+        orderBy: { startsAt: 'asc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.event.count({ where }),
+    ]);
 
     const registrations = await this.prisma.eventRegistration.findMany({
       where: {
         userId: user.id,
         status: RegistrationStatus.CONFIRMED,
-        eventId: { in: eligible.map((e) => e.id) },
+        eventId: { in: candidates.map((e) => e.id) },
       },
       select: { eventId: true },
     });
     const registeredIds = new Set(registrations.map((r) => r.eventId));
 
-    const total = eligible.length;
-    const pageRows = eligible.slice(skip, skip + limit);
-
     return {
-      data: pageRows.map((e) =>
+      data: candidates.map((e) =>
         this.toEventResponse(e, registeredIds.has(e.id)),
       ),
       meta: {
@@ -588,14 +538,9 @@ export class EventsService {
   }
 
   async register(eventId: string, user: User) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can register for events.');
+    if (user.role !== UserRole.PLAYER) {
+      throw new ForbiddenException('Only players can register for events.');
     }
-
-    const school = this.requireStudentSchool(
-      user,
-      await this.loadStudentSchool(user),
-    );
 
     const event = await this.prisma.event.findUnique({
       where: { id: eventId },
@@ -607,8 +552,16 @@ export class EventsService {
       throw new BadRequestException('Event is not open for registration.');
     }
 
-    if (!this.isEligible(user, school, event)) {
-      throw new ForbiddenException('You are not eligible for this event.');
+    this.assertRegistrationProfile(user, event);
+
+    const ineligibleReason = this.getIneligibilityReason(user, event);
+    if (ineligibleReason) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: 'NOT_ELIGIBLE',
+        message: ineligibleReason,
+      });
     }
 
     const now = new Date();
@@ -670,8 +623,8 @@ export class EventsService {
   }
 
   async myRegistrations(user: User, query: EventQueryDto) {
-    if (user.role !== UserRole.STUDENT) {
-      throw new ForbiddenException('Only students can view their registrations.');
+    if (user.role !== UserRole.PLAYER) {
+      throw new ForbiddenException('Only players can view their registrations.');
     }
 
     const page = query.page ?? 1;
@@ -765,79 +718,110 @@ export class EventsService {
     }
   }
 
-  private async loadStudentSchool(user: User) {
-    if (!user.schoolId) return null;
-    return this.prisma.school.findFirst({
-      where: { id: user.schoolId, isActive: true },
+  private eventHasZone(event: { state: string | null; district: string | null }) {
+    return Boolean(event.state?.trim() && event.district?.trim());
+  }
+
+  private throwProfileIncomplete(missing: string[]): never {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'PROFILE_INCOMPLETE',
+      message: 'Complete your profile to register for this event.',
+      missing,
     });
   }
 
-  private requireStudentSchool(
-    user: User,
-    school: {
-      id: string;
-      state: string | null;
-      district: string | null;
-    } | null,
-  ): { id: string; state: string; district: string } {
-    if (!user.schoolId || !school) {
-      throw new BadRequestException('Student must be linked to an active school.');
+  /**
+   * Requires gender + DOB always; location when the event has a zone;
+   * schoolId when the event targets specific schools.
+   */
+  private assertRegistrationProfile(user: User, event: EventWithRelations) {
+    const missing: string[] = [];
+    if (!user.gender) missing.push('gender');
+    if (!user.dateOfBirth) missing.push('dateOfBirth');
+
+    if (this.eventHasZone(event)) {
+      if (!user.state?.trim()) missing.push('state');
+      if (!user.district?.trim()) missing.push('district');
     }
-    if (!user.gender) {
-      throw new BadRequestException('Student gender is required for eligibility.');
+
+    if (event.schools.length > 0 && !user.schoolId) {
+      missing.push('schoolId');
     }
-    if (!user.dateOfBirth) {
-      throw new BadRequestException(
-        'Student date of birth is required for eligibility.',
-      );
+
+    if (missing.length) {
+      this.throwProfileIncomplete(missing);
     }
-    if (!school.state?.trim() || !school.district?.trim()) {
-      throw new BadRequestException(
-        'Student school must have state and district set.',
-      );
-    }
-    return {
-      id: school.id,
-      state: school.state,
-      district: school.district,
-    };
   }
 
-  private isEligible(
+  /**
+   * Returns a user-facing reason when the player cannot join, or null if eligible.
+   * Assumes profile fields required by assertRegistrationProfile are already present
+   * when called from register(); listing/detail may call with incomplete profiles.
+   */
+  private getIneligibilityReason(
     user: User,
-    school: {
-      id: string;
-      state: string | null;
-      district: string | null;
-    } | null,
     event: EventWithRelations,
-  ): boolean {
-    if (!school || !user.gender || !user.dateOfBirth) return false;
+  ): string | null {
+    if (!user.gender || !user.dateOfBirth) {
+      return 'Complete your gender and date of birth to register for this event.';
+    }
 
-    const eventHasZone = Boolean(event.state?.trim() && event.district?.trim());
-    if (eventHasZone) {
-      if (
-        school.state?.toLowerCase() !== event.state!.toLowerCase() ||
-        school.district?.toLowerCase() !== event.district!.toLowerCase()
-      ) {
-        return false;
+    if (this.eventHasZone(event)) {
+      if (!user.state?.trim() || !user.district?.trim()) {
+        return 'Add your state and district in your profile to register for this event.';
+      }
+      const userState = user.state.trim().toLowerCase();
+      const userDistrict = user.district.trim().toLowerCase();
+      const eventState = event.state!.trim().toLowerCase();
+      const eventDistrict = event.district!.trim().toLowerCase();
+      if (userState !== eventState || userDistrict !== eventDistrict) {
+        return (
+          `This event is only for players in ${event.district}, ${event.state}. ` +
+          `Your profile location is ${user.district}, ${user.state}.`
+        );
       }
     }
 
     if (event.genders.length > 0 && !event.genders.includes(user.gender)) {
-      return false;
+      const allowed = event.genders
+        .map((g) => g.replaceAll('_', ' ').toLowerCase())
+        .join(', ');
+      return `This event is limited to: ${allowed}. Your profile gender does not match.`;
     }
 
-    if (!this.fitsAgeCategory(user.dateOfBirth, event.startsAt, event.ageCategory)) {
-      return false;
+    if (
+      !this.fitsAgeCategory(user.dateOfBirth, event.startsAt, event.ageCategory)
+    ) {
+      const age = this.ageOnDate(user.dateOfBirth, event.startsAt);
+      if (event.ageCategory === AgeCategory.OPEN) {
+        return 'You are not eligible for this event age category.';
+      }
+      return (
+        `This event is for age category ${event.ageCategory} ` +
+        `(under ${event.ageCategory.slice(1)} on event day). ` +
+        `Your age on the event date is ${age}.`
+      );
     }
 
     if (event.schools.length > 0) {
-      const allowed = event.schools.some((s) => s.schoolId === school.id);
-      if (!allowed) return false;
+      if (!user.schoolId) {
+        return 'This event is limited to selected schools. Link your school in your profile to register.';
+      }
+      const allowed = event.schools.some((s) => s.schoolId === user.schoolId);
+      if (!allowed) {
+        const names = event.schools
+          .map((s) => s.school?.name)
+          .filter(Boolean)
+          .join(', ');
+        return names
+          ? `This event is only open to: ${names}. Your school is not on the list.`
+          : 'Your school is not eligible for this event.';
+      }
     }
 
-    return true;
+    return null;
   }
 
   fitsAgeCategory(

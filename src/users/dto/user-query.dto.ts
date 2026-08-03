@@ -6,7 +6,7 @@ import { PaginationQueryDto } from '../../common/dto/pagination.dto';
 export class UserQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: UserRole,
-    example: UserRole.STUDENT,
+    example: UserRole.PLAYER,
     description: 'Filter by role',
   })
   @IsOptional()
@@ -40,7 +40,7 @@ export class UserQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({
     example: 'clxyz123schoolid',
-    description: 'Filter students by school id',
+    description: 'Filter players by school id',
   })
   @IsOptional()
   @IsString()

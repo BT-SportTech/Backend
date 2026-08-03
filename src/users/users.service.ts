@@ -136,6 +136,20 @@ export class UsersService {
       }
     }
 
+    let schoolIdUpdate: string | null | undefined = undefined;
+    if (dto.schoolId !== undefined) {
+      const schoolId = dto.schoolId?.trim() || null;
+      if (schoolId) {
+        const school = await this.prisma.school.findFirst({
+          where: { id: schoolId, isActive: true },
+        });
+        if (!school) {
+          throw new BadRequestException('Invalid or inactive school.');
+        }
+      }
+      schoolIdUpdate = schoolId;
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -151,6 +165,7 @@ export class UsersService {
         pincode: dto.pincode,
         sportsInterested: dto.sportsInterested,
         company: dto.company,
+        ...(schoolIdUpdate !== undefined ? { schoolId: schoolIdUpdate } : {}),
       },
     });
 

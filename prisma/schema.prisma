@@ -17,7 +17,7 @@ enum SchoolType {
 }
 
 enum UserRole {
-  STUDENT
+  PLAYER
   PROFESSIONAL
   ADMIN
 }
@@ -120,7 +120,7 @@ model School {
   certifications        String[]
 
   // Relations
-  students     User[]
+  players      User[]
   eventSchools EventSchool[]
 }
 
@@ -138,7 +138,7 @@ model User {
   phone       String?
   passwordHash String
 
-  role        UserRole @default(STUDENT)
+  role        UserRole @default(PLAYER)
   gender      Gender?
   dateOfBirth DateTime?
 
@@ -150,7 +150,7 @@ model User {
 
   sportsInterested String[]
 
-  // Student-only
+  // Player-only
   schoolId     String?
   presentClass Int?
   school       School? @relation(fields: [schoolId], references: [id])

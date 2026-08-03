@@ -52,6 +52,14 @@ export class UpdateUserDto {
   @IsString()
   pincode?: string;
 
+  @ApiPropertyOptional({
+    example: 'clxyz123schoolid',
+    description: 'Optional school link (required only for school-targeted events)',
+  })
+  @IsOptional()
+  @IsString()
+  schoolId?: string;
+
   @ApiPropertyOptional({ type: [String], example: ['Cricket', 'Badminton'] })
   @IsOptional()
   @IsString({ each: true })

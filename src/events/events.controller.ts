@@ -86,10 +86,10 @@ export class EventsController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.STUDENT)
+  @Roles(UserRole.PLAYER)
   @Get('eligible')
   @ApiOperation({
-    summary: 'List published events eligible for the current student',
+    summary: 'List published events eligible for the current player',
   })
   findEligible(
     @CurrentUser() user: Prisma.User,
@@ -99,9 +99,9 @@ export class EventsController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.STUDENT)
+  @Roles(UserRole.PLAYER)
   @Get('me/registrations')
-  @ApiOperation({ summary: 'List current student registrations' })
+  @ApiOperation({ summary: 'List current player registrations' })
   myRegistrations(
     @CurrentUser() user: Prisma.User,
     @Query() query: EventQueryDto,
@@ -111,7 +111,7 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard)
   @Get(':id')
-  @ApiOperation({ summary: 'Get event detail (admin or eligible student)' })
+  @ApiOperation({ summary: 'Get event detail (admin or eligible player)' })
   findOne(@Param('id') id: string, @CurrentUser() user: Prisma.User) {
     return this.eventsService.findOne(id, user);
   }
@@ -179,9 +179,9 @@ export class EventsController {
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.STUDENT)
+  @Roles(UserRole.PLAYER)
   @Post(':id/register')
-  @ApiOperation({ summary: 'Register current student for an event' })
+  @ApiOperation({ summary: 'Register current player for an event' })
   register(@Param('id') id: string, @CurrentUser() user: Prisma.User) {
     return this.eventsService.register(id, user);
   }
