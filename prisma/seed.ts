@@ -33,9 +33,10 @@ async function main() {
 
   const starters = [
     { name: 'Chess', sidesPerMatch: 2, playersPerSide: 1, winPoints: 50, lossPoints: 10 },
-    { name: 'Football', sidesPerMatch: 2, playersPerSide: 11, winPoints: 100, lossPoints: 20 },
-    { name: 'Basketball', sidesPerMatch: 2, playersPerSide: 5, winPoints: 80, lossPoints: 15 },
+    { name: 'Table Tennis', sidesPerMatch: 2, playersPerSide: 1, winPoints: 40, lossPoints: 8 },
+    { name: 'Tennis', sidesPerMatch: 2, playersPerSide: 1, winPoints: 50, lossPoints: 10 },
     { name: 'Badminton', sidesPerMatch: 2, playersPerSide: 1, winPoints: 40, lossPoints: 8 },
+    { name: 'Football', sidesPerMatch: 2, playersPerSide: 11, winPoints: 100, lossPoints: 20 },
   ];
 
   for (const g of starters) {

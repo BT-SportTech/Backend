@@ -757,8 +757,9 @@ export class EventsService {
 
   /**
    * Returns a user-facing reason when the player cannot join, or null if eligible.
-   * Assumes profile fields required by assertRegistrationProfile are already present
-   * when called from register(); listing/detail may call with incomplete profiles.
+   * Location / age / gender mismatches are advisory only — players may still register.
+   * School targeting remains enforced. Missing profile fields are handled by
+   * assertRegistrationProfile.
    */
   private getIneligibilityReason(
     user: User,
@@ -768,41 +769,11 @@ export class EventsService {
       return 'Complete your gender and date of birth to register for this event.';
     }
 
+    // Zone / age / gender mismatches are advisory (shown in the app, not blocked here).
     if (this.eventHasZone(event)) {
       if (!user.state?.trim() || !user.district?.trim()) {
         return 'Add your state and district in your profile to register for this event.';
       }
-      const userState = user.state.trim().toLowerCase();
-      const userDistrict = user.district.trim().toLowerCase();
-      const eventState = event.state!.trim().toLowerCase();
-      const eventDistrict = event.district!.trim().toLowerCase();
-      if (userState !== eventState || userDistrict !== eventDistrict) {
-        return (
-          `This event is only for players in ${event.district}, ${event.state}. ` +
-          `Your profile location is ${user.district}, ${user.state}.`
-        );
-      }
-    }
-
-    if (event.genders.length > 0 && !event.genders.includes(user.gender)) {
-      const allowed = event.genders
-        .map((g) => g.replaceAll('_', ' ').toLowerCase())
-        .join(', ');
-      return `This event is limited to: ${allowed}. Your profile gender does not match.`;
-    }
-
-    if (
-      !this.fitsAgeCategory(user.dateOfBirth, event.startsAt, event.ageCategory)
-    ) {
-      const age = this.ageOnDate(user.dateOfBirth, event.startsAt);
-      if (event.ageCategory === AgeCategory.OPEN) {
-        return 'You are not eligible for this event age category.';
-      }
-      return (
-        `This event is for age category ${event.ageCategory} ` +
-        `(under ${event.ageCategory.slice(1)} on event day). ` +
-        `Your age on the event date is ${age}.`
-      );
     }
 
     if (event.schools.length > 0) {
