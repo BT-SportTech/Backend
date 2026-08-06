@@ -135,4 +135,22 @@ export class CreateEventDto {
   @ArrayUnique()
   @IsString({ each: true })
   organizerIds?: string[];
+
+  @ApiPropertyOptional({
+    example: 25,
+    description: 'Number of chess boards (required for Chess events)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  boardCount?: number;
+
+  @ApiPropertyOptional({
+    example: 3,
+    description: 'Games each player plays (chess events, default 3)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  gamesPerPlayer?: number;
 }

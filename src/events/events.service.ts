@@ -68,6 +68,8 @@ export class EventsService {
     }
 
     const game = await this.requireActiveGame(dto.gameId);
+    this.assertChessBoardCount(game.name, dto.boardCount);
+
     const {
       schoolIds,
       organizerIds,
@@ -77,6 +79,8 @@ export class EventsService {
       gameId,
       state,
       district,
+      boardCount,
+      gamesPerPlayer,
       ...rest
     } = dto;
 
@@ -102,6 +106,8 @@ export class EventsService {
           sport: game.name,
           state: this.normalizeZone(state),
           district: this.normalizeZone(district),
+          boardCount: boardCount ?? null,
+          gamesPerPlayer: gamesPerPlayer ?? 3,
           schools: schoolIds?.length
             ? { create: schoolIds.map((schoolId) => ({ schoolId })) }
             : undefined,
@@ -227,13 +233,19 @@ export class EventsService {
 
     let gameSport: string | undefined;
     let gameWinPoints: number | undefined;
+    let resolvedGameName = event.game?.name;
     if (dto.gameId) {
       const game = await this.requireActiveGame(dto.gameId);
       gameSport = game.name;
       gameWinPoints = game.winPoints;
+      resolvedGameName = game.name;
     }
 
-    const { schoolIds, organizerIds, ...rest } = dto;
+    const effectiveBoardCount =
+      dto.boardCount !== undefined ? dto.boardCount : event.boardCount;
+    this.assertChessBoardCount(resolvedGameName, effectiveBoardCount);
+
+    const { schoolIds, organizerIds, boardCount, gamesPerPlayer, ...rest } = dto;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (schoolIds !== undefined) {
@@ -296,6 +308,8 @@ export class EventsService {
               ? { pointsReward: gameWinPoints }
               : {}),
           ...(rest.imageUrl !== undefined ? { imageUrl: rest.imageUrl } : {}),
+          ...(boardCount !== undefined ? { boardCount } : {}),
+          ...(gamesPerPlayer !== undefined ? { gamesPerPlayer } : {}),
         },
         include: eventInclude,
       });
@@ -331,6 +345,8 @@ export class EventsService {
         'Event name, sport, and venue are required to publish.',
       );
     }
+
+    this.assertChessBoardCount(event.game?.name, event.boardCount);
 
     const updated = await this.prisma.event.update({
       where: { id },
@@ -576,7 +592,10 @@ export class EventsService {
   }
 
   private async listRegistrations(eventId: string) {
-    const event = await this.prisma.event.findUnique({ where: { id: eventId } });
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: { game: true },
+    });
     if (!event) throw new NotFoundException('Event not found.');
 
     const rows = await this.prisma.eventRegistration.findMany({
@@ -589,14 +608,29 @@ export class EventsService {
             lastName: true,
             username: true,
             email: true,
+            dateOfBirth: true,
           },
         },
         attendedBy: {
           select: { id: true, firstName: true, lastName: true },
         },
+        withdrawnBy: {
+          select: { id: true, firstName: true, lastName: true },
+        },
       },
       orderBy: { registeredAt: 'asc' },
     });
+
+    const chessRatings =
+      event.game?.name === 'Chess' && event.gameId
+        ? await this.prisma.playerGameRating.findMany({
+            where: {
+              gameId: event.gameId,
+              userId: { in: rows.map((r) => r.userId) },
+            },
+          })
+        : [];
+    const ratingByUser = new Map(chessRatings.map((r) => [r.userId, r]));
 
     return {
       eventId,
@@ -610,6 +644,16 @@ export class EventsService {
         attendedAt: r.attendedAt,
         attendedById: r.attendedById,
         attendedBy: r.attendedBy,
+        withdrawnAt: r.withdrawnAt,
+        withdrawnById: r.withdrawnById,
+        withdrawnBy: r.withdrawnBy,
+        eventWins: r.eventWins,
+        eventLosses: r.eventLosses,
+        eventDraws: r.eventDraws,
+        gamesCompleted: r.gamesCompleted,
+        whiteGames: r.whiteGames,
+        blackGames: r.blackGames,
+        chessRating: ratingByUser.get(r.userId)?.rating ?? null,
         user: r.user,
       })),
       attendanceWindowOpen: this.isAttendanceWindowOpen(
@@ -1048,6 +1092,14 @@ export class EventsService {
     return trimmed.length ? trimmed : null;
   }
 
+  private assertChessBoardCount(gameName: string | undefined, boardCount?: number | null) {
+    if (gameName === 'Chess' && (!boardCount || boardCount < 1)) {
+      throw new BadRequestException(
+        'boardCount is required and must be at least 1 for Chess events.',
+      );
+    }
+  }
+
   private toGameResponse(
     game: {
       id: string;
@@ -1100,6 +1152,10 @@ export class EventsService {
       genders: event.genders,
       fee: event.fee,
       pointsReward: event.pointsReward,
+      boardCount: event.boardCount,
+      gamesPerPlayer: event.gamesPerPlayer,
+      matchmakingStatus: event.matchmakingStatus,
+      matchmakingStartedAt: event.matchmakingStartedAt,
       imageUrl: event.imageUrl,
       createdBy: event.createdBy,
       schools: event.schools.map((s) => s.school),

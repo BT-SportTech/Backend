@@ -56,6 +56,35 @@ enum MatchOutcome {
   DRAW
 }
 
+enum MatchmakingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum ChessRoundStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+}
+
+enum ChessBatchStatus {
+  ACTIVE
+  COMPLETED
+}
+
+enum ChessMatchResult {
+  WHITE_WIN
+  BLACK_WIN
+  DRAW
+}
+
+enum ChessMatchStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
 // ─── School ──────────────────────────────────────────────────────────────────
 
 model School {
@@ -160,12 +189,15 @@ model User {
   company String?
 
   // Relations
-  refreshTokens       RefreshToken[]
-  createdEvents       Event[]              @relation("EventCreator")
-  eventRegistrations  EventRegistration[]
-  organizedEvents     EventOrganizer[]
-  organizerInvites    OrganizerInvite[]    @relation("InviteCreator")
-  attendanceMarked    EventRegistration[]  @relation("AttendanceMarker")
+  refreshTokens        RefreshToken[]
+  createdEvents        Event[]              @relation("EventCreator")
+  eventRegistrations   EventRegistration[]
+  organizedEvents      EventOrganizer[]
+  organizerInvites     OrganizerInvite[]    @relation("InviteCreator")
+  attendanceMarked     EventRegistration[]  @relation("AttendanceMarker")
+  withdrawnRegistrations EventRegistration[] @relation("WithdrawnMarker")
+  completedChessMatches ChessMatch[]        @relation("ChessMatchCompleter")
+  playerGameRatings    PlayerGameRating[]
 }
 
 // ─── Refresh Token ────────────────────────────────────────────────────────────
@@ -195,7 +227,8 @@ model Game {
   lossPoints     Int      @default(0)
   isActive       Boolean  @default(true)
 
-  events Event[]
+  events           Event[]
+  playerGameRatings PlayerGameRating[]
 }
 
 // ─── Event ────────────────────────────────────────────────────────────────────
@@ -230,6 +263,11 @@ model Event {
   fee           Float @default(0)
   pointsReward  Int   @default(50)
 
+  boardCount           Int?
+  gamesPerPlayer       Int               @default(3)
+  matchmakingStatus    MatchmakingStatus @default(NOT_STARTED)
+  matchmakingStartedAt DateTime?
+
   gameId String?
   game   Game?  @relation(fields: [gameId], references: [id])
 
@@ -239,6 +277,7 @@ model Event {
   schools        EventSchool[]
   registrations  EventRegistration[]
   organizers     EventOrganizer[]
+  chessRounds    ChessRound[]
 }
 
 model EventOrganizer {
@@ -291,8 +330,99 @@ model EventRegistration {
   attendedById String?
   attendedBy   User?              @relation("AttendanceMarker", fields: [attendedById], references: [id])
 
+  withdrawnAt   DateTime?
+  withdrawnById String?
+  withdrawnBy   User? @relation("WithdrawnMarker", fields: [withdrawnById], references: [id])
+
+  eventWins      Int @default(0)
+  eventLosses    Int @default(0)
+  eventDraws     Int @default(0)
+  gamesCompleted Int @default(0)
+  whiteGames     Int @default(0)
+  blackGames     Int @default(0)
+
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  whiteChessMatches ChessMatch[] @relation("WhitePlayer")
+  blackChessMatches ChessMatch[] @relation("BlackPlayer")
+
   @@unique([eventId, userId])
+}
+
+// ─── Chess Matchmaking ────────────────────────────────────────────────────────
+
+model PlayerGameRating {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  gameId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  rating      Int @default(1000)
+  gamesPlayed Int @default(0)
+  wins        Int @default(0)
+  losses      Int @default(0)
+  draws       Int @default(0)
+
+  @@unique([userId, gameId])
+  @@index([gameId, rating])
+}
+
+model ChessRound {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  eventId     String
+  roundNumber Int
+  status      ChessRoundStatus @default(PENDING)
+
+  event   Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  batches ChessRoundBatch[]
+
+  @@unique([eventId, roundNumber])
+}
+
+model ChessRoundBatch {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  roundId     String
+  batchNumber Int
+  status      ChessBatchStatus @default(ACTIVE)
+  boardCount  Int
+
+  round   ChessRound   @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  matches ChessMatch[]
+
+  @@unique([roundId, batchNumber])
+}
+
+model ChessMatch {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batchId      String
+  boardNumber  Int
+  whiteRegistrationId String
+  blackRegistrationId String
+  result       ChessMatchResult?
+  status       ChessMatchStatus @default(SCHEDULED)
+  completedAt  DateTime?
+  completedById String?
+
+  batch             ChessRoundBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  whiteRegistration EventRegistration @relation("WhitePlayer", fields: [whiteRegistrationId], references: [id], onDelete: Cascade)
+  blackRegistration EventRegistration @relation("BlackPlayer", fields: [blackRegistrationId], references: [id], onDelete: Cascade)
+  completedBy       User?             @relation("ChessMatchCompleter", fields: [completedById], references: [id])
+
+  @@unique([batchId, boardNumber])
+  @@index([whiteRegistrationId])
+  @@index([blackRegistrationId])
 }
