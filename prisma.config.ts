@@ -10,6 +10,7 @@ export default defineConfig({
     seed: "tsx -r dotenv/config prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Migrations / introspect should use direct (or session) URL when set.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
