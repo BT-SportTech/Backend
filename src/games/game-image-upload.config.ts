@@ -1,8 +1,8 @@
-import { mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { ensureUploadDir } from '../common/upload-paths';
 
-export const GAME_IMAGE_UPLOAD_DIR = 'uploads/game-images';
+export const GAME_IMAGE_UPLOAD_DIR = ensureUploadDir('game-images');
 
 const allowedMimeTypes = new Set([
   'image/jpeg',
@@ -10,8 +10,6 @@ const allowedMimeTypes = new Set([
   'image/webp',
   'image/gif',
 ]);
-
-mkdirSync(GAME_IMAGE_UPLOAD_DIR, { recursive: true });
 
 export const gameImageStorage = diskStorage({
   destination: GAME_IMAGE_UPLOAD_DIR,

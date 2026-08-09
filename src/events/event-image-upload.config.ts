@@ -1,8 +1,8 @@
-import { mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { ensureUploadDir } from '../common/upload-paths';
 
-export const EVENT_IMAGE_UPLOAD_DIR = 'uploads/event-images';
+export const EVENT_IMAGE_UPLOAD_DIR = ensureUploadDir('event-images');
 
 const allowedMimeTypes = new Set([
   'image/jpeg',
@@ -10,8 +10,6 @@ const allowedMimeTypes = new Set([
   'image/webp',
   'image/gif',
 ]);
-
-mkdirSync(EVENT_IMAGE_UPLOAD_DIR, { recursive: true });
 
 export const eventImageStorage = diskStorage({
   destination: EVENT_IMAGE_UPLOAD_DIR,

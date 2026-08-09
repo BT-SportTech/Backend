@@ -1,8 +1,8 @@
-import { mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { ensureUploadDir } from '../common/upload-paths';
 
-export const SCHOOL_LOGO_UPLOAD_DIR = 'uploads/school-logos';
+export const SCHOOL_LOGO_UPLOAD_DIR = ensureUploadDir('school-logos');
 
 const allowedMimeTypes = new Set([
   'image/jpeg',
@@ -10,8 +10,6 @@ const allowedMimeTypes = new Set([
   'image/webp',
   'image/gif',
 ]);
-
-mkdirSync(SCHOOL_LOGO_UPLOAD_DIR, { recursive: true });
 
 export const schoolLogoStorage = diskStorage({
   destination: SCHOOL_LOGO_UPLOAD_DIR,
