@@ -54,19 +54,26 @@ export class UpdateUserDto {
 
   @ApiPropertyOptional({
     example: 'clxyz123schoolid',
-    description: 'Optional school link (required only for school-targeted events)',
+    description:
+      'School link for students. Cleared when company is set. Pass null to unlink.',
+    nullable: true,
   })
   @IsOptional()
   @IsString()
-  schoolId?: string;
+  schoolId?: string | null;
 
   @ApiPropertyOptional({ type: [String], example: ['Cricket', 'Badminton'] })
   @IsOptional()
   @IsString({ each: true })
   sportsInterested?: string[];
 
-  @ApiPropertyOptional({ example: 'Acme Corp' })
+  @ApiPropertyOptional({
+    example: 'Acme Corp',
+    description:
+      'Company/organization for open category (employees, seniors, etc.). Cleared when schoolId is set. Pass null to clear.',
+    nullable: true,
+  })
   @IsOptional()
   @IsString()
-  company?: string;
+  company?: string | null;
 }

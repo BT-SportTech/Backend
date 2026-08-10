@@ -150,6 +150,18 @@ export class UsersService {
       schoolIdUpdate = schoolId;
     }
 
+    let companyUpdate: string | null | undefined = undefined;
+    if (dto.company !== undefined) {
+      companyUpdate = dto.company?.trim() || null;
+    }
+
+    // Student ↔ open: linking a school clears company; setting company clears school.
+    if (schoolIdUpdate) {
+      companyUpdate = null;
+    } else if (companyUpdate) {
+      schoolIdUpdate = null;
+    }
+
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
@@ -164,7 +176,7 @@ export class UsersService {
         city: dto.city,
         pincode: dto.pincode,
         sportsInterested: dto.sportsInterested,
-        company: dto.company,
+        ...(companyUpdate !== undefined ? { company: companyUpdate } : {}),
         ...(schoolIdUpdate !== undefined ? { schoolId: schoolIdUpdate } : {}),
       },
     });
