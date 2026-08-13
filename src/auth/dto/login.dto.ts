@@ -12,7 +12,7 @@ export class LoginDto {
   username?: string;
 
   @ApiPropertyOptional({
-    example: 'admin@sporttech.com',
+    example: 'admin@Sportech.com',
     description: 'Email (accepted for admin/web login)',
   })
   @ValidateIf((o: LoginDto) => !o.username)

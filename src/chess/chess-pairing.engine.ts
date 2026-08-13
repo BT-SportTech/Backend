@@ -166,8 +166,7 @@ export function pairRoundN(
   const evenBracket = players.filter((p) => bracketFor(p) === 'even');
 
   const allPairs: PairingAssignment[] = [];
-  let byePlayer: PairingPlayer | null = null;
-  const unpairedPlayers: PairingPlayer[] = [];
+  const spillover: PairingPlayer[] = [];
   let boardsLeft = boardCount;
 
   for (const bracket of [winnerBracket, loserBracket, evenBracket]) {
@@ -175,16 +174,37 @@ export function pairRoundN(
     const result = pairPool(bracket, boardsLeft);
     allPairs.push(...result.pairs);
     boardsLeft -= result.pairs.length;
-    if (result.byePlayer && !byePlayer) {
+    if (result.byePlayer) {
+      spillover.push(result.byePlayer);
+    }
+    spillover.push(...result.unpairedPlayers);
+  }
+
+  let byePlayer: PairingPlayer | null = null;
+
+  if (boardsLeft > 0 && spillover.length >= 2) {
+    const result = pairPool(spillover, boardsLeft);
+    allPairs.push(...result.pairs);
+    boardsLeft -= result.pairs.length;
+    if (result.byePlayer) {
       byePlayer = result.byePlayer;
     }
-    unpairedPlayers.push(...result.unpairedPlayers);
+    return {
+      pairs: allPairs,
+      byePlayer,
+      unpairedPlayers: result.unpairedPlayers,
+    };
+  }
+
+  if (spillover.length === 1 && allPairs.length < boardCount) {
+    byePlayer = spillover[0];
+    spillover.length = 0;
   }
 
   return {
     pairs: allPairs,
     byePlayer,
-    unpairedPlayers,
+    unpairedPlayers: spillover,
   };
 }
 

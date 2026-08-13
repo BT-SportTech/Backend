@@ -131,6 +131,14 @@ describe('ChessPairingEngine', () => {
       expect(pairIds.some(([a, b]) => a.startsWith('w') && b.startsWith('w'))).toBe(true);
       expect(pairIds.some(([a, b]) => a.startsWith('l') && b.startsWith('l'))).toBe(true);
     });
+
+    it('pairs single leftover players across brackets', () => {
+      const winner = makePlayer({ registrationId: 'w1', eventWins: 1 });
+      const loser = makePlayer({ registrationId: 'l1', eventLosses: 1 });
+      const result = pairForRound(2, [winner, loser], 3);
+      expect(result.pairs).toHaveLength(1);
+      expect(result.byePlayer).toBeNull();
+    });
   });
 
   describe('color balance across multiple pairings', () => {

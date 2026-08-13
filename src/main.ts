@@ -27,7 +27,7 @@ async function bootstrap() {
   );
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('SportTech API')
+    .setTitle('Sportech API')
     .setDescription('Sports event management API for players and admin panel')
     .setVersion('1.0')
     .addBearerAuth(

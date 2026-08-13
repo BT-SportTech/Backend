@@ -14,7 +14,7 @@ export function isServerlessRuntime() {
 /** Root directory served at `/uploads/`. */
 export function getUploadsRoot(): string {
   if (isServerlessRuntime()) {
-    return join(tmpdir(), 'sporttech-uploads');
+    return join(tmpdir(), 'Sportech-uploads');
   }
   return join(process.cwd(), 'uploads');
 }

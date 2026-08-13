@@ -77,7 +77,11 @@ export class ChessMatchmakingService {
       },
     });
 
-    return this.generateBatch(eventId, round.id, 1, 1, boardCount);
+    const batch = await this.generateBatch(eventId, round.id, 1, 1, boardCount);
+    if (batch.byePlayer) {
+      await this.grantBye(batch.byePlayer.registrationId);
+    }
+    return batch;
   }
 
   async nextBatch(eventId: string, user: User) {
@@ -118,13 +122,17 @@ export class ChessMatchmakingService {
 
     if (remainingInRound >= 2) {
       const nextBatchNumber = activeBatch.batchNumber + 1;
-      return this.generateBatch(
+      const batch = await this.generateBatch(
         eventId,
         round.id,
         round.roundNumber,
         nextBatchNumber,
         boardCount,
       );
+      if (batch.byePlayer) {
+        await this.grantBye(batch.byePlayer.registrationId);
+      }
+      return batch;
     }
 
     let byeGranted: { registrationId: string; userId: string } | null = null;
@@ -176,6 +184,10 @@ export class ChessMatchmakingService {
         boardCount,
       );
 
+      if (batch.byePlayer) {
+        await this.grantBye(batch.byePlayer.registrationId);
+      }
+
       return { ...batch, byeGranted };
     }
 
@@ -224,9 +236,23 @@ export class ChessMatchmakingService {
       },
     });
 
-    const activeBatch = event.chessRounds
-      .flatMap((r) => r.batches)
-      .find((b) => b.status === ChessBatchStatus.ACTIVE);
+    let activeBatch: (typeof event.chessRounds)[number]['batches'][number] | null =
+      null;
+    let activeRoundNumber = -1;
+    for (const round of event.chessRounds) {
+      for (const batch of round.batches) {
+        if (batch.status !== ChessBatchStatus.ACTIVE) continue;
+        if (
+          !activeBatch ||
+          round.roundNumber > activeRoundNumber ||
+          (round.roundNumber === activeRoundNumber &&
+            batch.batchNumber > activeBatch.batchNumber)
+        ) {
+          activeBatch = batch;
+          activeRoundNumber = round.roundNumber;
+        }
+      }
+    }
 
     return {
       eventId,
@@ -518,9 +544,14 @@ export class ChessMatchmakingService {
     const players = await this.buildPairingPool(eventId, roundNumber);
     const pairingResult = pairForRound(roundNumber, players, boardCount);
 
-    if (pairingResult.pairs.length === 0 && !pairingResult.byePlayer) {
+    if (pairingResult.pairs.length === 0) {
+      if (pairingResult.byePlayer) {
+        await this.grantBye(pairingResult.byePlayer.registrationId);
+      }
       throw new BadRequestException(
-        'No pairings could be generated for this batch.',
+        pairingResult.byePlayer
+          ? 'Only one player remained in this board set; bye recorded. Tap next board set to continue.'
+          : 'No pairings could be generated for this batch.',
       );
     }
 
@@ -817,6 +848,14 @@ export class ChessMatchmakingService {
           matchmakingStatus: MatchmakingStatus.COMPLETED,
           status: EventStatus.COMPLETED,
         },
+      });
+
+      await tx.chessRoundBatch.updateMany({
+        where: {
+          status: ChessBatchStatus.ACTIVE,
+          round: { eventId },
+        },
+        data: { status: ChessBatchStatus.COMPLETED },
       });
     });
   }
