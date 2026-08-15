@@ -1,7 +1,20 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { MatchOutcome, Prisma, RegistrationStatus, User } from '@prisma/client';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  ChessMatchResult,
+  ChessMatchStatus,
+  MatchOutcome,
+  Prisma,
+  RegistrationStatus,
+  User,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_PROFILES_PER_PHONE } from '../auth/profile.constants';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
 
@@ -25,14 +38,32 @@ export class UsersService {
   }
 
   async myStats(user: User) {
+    return this.statsForUserId(user.id);
+  }
+
+  async statsForUserId(userId: string) {
+    await this.assertPlayerExists(userId);
+
     const rows = await this.prisma.eventRegistration.findMany({
       where: {
-        userId: user.id,
+        userId,
         status: RegistrationStatus.CONFIRMED,
         outcome: { not: null },
       },
-      include: {
-        event: { select: { sport: true } },
+      select: {
+        outcome: true,
+        pointsEarned: true,
+        eventWins: true,
+        eventLosses: true,
+        eventDraws: true,
+        gamesCompleted: true,
+        event: {
+          select: {
+            sport: true,
+            pointsReward: true,
+            lossPoints: true,
+          },
+        },
       },
     });
 
@@ -55,21 +86,37 @@ export class UsersService {
         bucket = { sport, played: 0, won: 0, lost: 0, draw: 0, points: 0 };
         bySportMap.set(sport, bucket);
       }
-      bucket.played += 1;
-      totals.played += 1;
-      bucket.points += row.pointsEarned;
-      totals.points += row.pointsEarned;
 
-      if (row.outcome === MatchOutcome.WIN) {
-        bucket.won += 1;
-        totals.won += 1;
-      } else if (row.outcome === MatchOutcome.LOSS) {
-        bucket.lost += 1;
-        totals.lost += 1;
-      } else if (row.outcome === MatchOutcome.DRAW) {
-        bucket.draw += 1;
-        totals.draw += 1;
+      const perGamePlayed =
+        row.eventWins + row.eventLosses + row.eventDraws;
+      const points = this.pointsForRegistration(row);
+
+      if (perGamePlayed > 0) {
+        bucket.played += perGamePlayed;
+        totals.played += perGamePlayed;
+        bucket.won += row.eventWins;
+        totals.won += row.eventWins;
+        bucket.lost += row.eventLosses;
+        totals.lost += row.eventLosses;
+        bucket.draw += row.eventDraws;
+        totals.draw += row.eventDraws;
+      } else {
+        bucket.played += 1;
+        totals.played += 1;
+        if (row.outcome === MatchOutcome.WIN) {
+          bucket.won += 1;
+          totals.won += 1;
+        } else if (row.outcome === MatchOutcome.LOSS) {
+          bucket.lost += 1;
+          totals.lost += 1;
+        } else if (row.outcome === MatchOutcome.DRAW) {
+          bucket.draw += 1;
+          totals.draw += 1;
+        }
       }
+
+      bucket.points += points;
+      totals.points += points;
     }
 
     const bySport = [...bySportMap.values()].sort((a, b) =>
@@ -77,6 +124,261 @@ export class UsersService {
     );
 
     return { totals, bySport };
+  }
+
+  async findPlayerById(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        username: true,
+        email: true,
+        phone: true,
+        role: true,
+        gender: true,
+        dateOfBirth: true,
+        state: true,
+        district: true,
+        city: true,
+        pincode: true,
+        sportsInterested: true,
+        schoolId: true,
+        presentClass: true,
+        company: true,
+        createdAt: true,
+        school: { select: { id: true, name: true, city: true } },
+      },
+    });
+
+    if (!user || user.role !== UserRole.PLAYER) {
+      throw new NotFoundException('Player not found.');
+    }
+
+    const [pointsMap, chessRating] = await Promise.all([
+      this.getTotalPointsByUserIds([id]),
+      this.getChessRatingForUser(id),
+    ]);
+
+    return {
+      ...user,
+      totalPoints: pointsMap.get(id) ?? 0,
+      chessRating,
+    };
+  }
+
+  async registrationsForUser(userId: string, query: PaginationQueryDto) {
+    await this.assertPlayerExists(userId);
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.EventRegistrationWhereInput = {
+      userId,
+      status: RegistrationStatus.CONFIRMED,
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.eventRegistration.findMany({
+        where,
+        select: {
+          id: true,
+          eventId: true,
+          userId: true,
+          status: true,
+          registeredAt: true,
+          outcome: true,
+          pointsEarned: true,
+          eventWins: true,
+          eventLosses: true,
+          eventDraws: true,
+          gamesCompleted: true,
+          event: {
+            select: {
+              id: true,
+              name: true,
+              sport: true,
+              venue: true,
+              startsAt: true,
+              status: true,
+              pointsReward: true,
+              lossPoints: true,
+            },
+          },
+        },
+        orderBy: { registeredAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.eventRegistration.count({ where }),
+    ]);
+
+    return {
+      data: data.map((registration) => ({
+        id: registration.id,
+        eventId: registration.eventId,
+        userId: registration.userId,
+        status: registration.status,
+        registeredAt: registration.registeredAt,
+        outcome: registration.outcome,
+        pointsEarned: this.pointsForRegistration(registration),
+        eventWins: registration.eventWins,
+        eventLosses: registration.eventLosses,
+        eventDraws: registration.eventDraws,
+        gamesCompleted: registration.gamesCompleted,
+        event: {
+          id: registration.event.id,
+          name: registration.event.name,
+          sport: registration.event.sport,
+          venue: registration.event.venue,
+          startsAt: registration.event.startsAt,
+          status: registration.event.status,
+        },
+      })),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
+    };
+  }
+
+  async matchesForUser(userId: string, query: PaginationQueryDto) {
+    await this.assertPlayerExists(userId);
+
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.ChessMatchWhereInput = {
+      status: ChessMatchStatus.COMPLETED,
+      OR: [
+        { whiteRegistration: { userId } },
+        { blackRegistration: { userId } },
+      ],
+    };
+
+    const [matches, total] = await Promise.all([
+      this.prisma.chessMatch.findMany({
+        where,
+        include: {
+          batch: {
+            select: {
+              batchNumber: true,
+              round: {
+                select: {
+                  roundNumber: true,
+                  event: {
+                    select: { id: true, name: true, sport: true },
+                  },
+                },
+              },
+            },
+          },
+          whiteRegistration: {
+            select: {
+              id: true,
+              userId: true,
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  username: true,
+                },
+              },
+            },
+          },
+          blackRegistration: {
+            select: {
+              id: true,
+              userId: true,
+              user: {
+                select: {
+                  id: true,
+                  firstName: true,
+                  lastName: true,
+                  username: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.chessMatch.count({ where }),
+    ]);
+
+    return {
+      data: matches.map((match) => this.toMatchResponse(match)),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
+    };
+  }
+
+  async getTotalPointsByUserIds(
+    userIds: string[],
+  ): Promise<Map<string, number>> {
+    if (!userIds.length) return new Map();
+
+    const rows = await this.prisma.eventRegistration.findMany({
+      where: {
+        userId: { in: userIds },
+        status: RegistrationStatus.CONFIRMED,
+        outcome: { not: null },
+      },
+      select: {
+        userId: true,
+        pointsEarned: true,
+        eventWins: true,
+        eventLosses: true,
+        eventDraws: true,
+        event: {
+          select: { pointsReward: true, lossPoints: true },
+        },
+      },
+    });
+
+    const totals = new Map<string, number>();
+    for (const id of userIds) {
+      totals.set(id, 0);
+    }
+    for (const row of rows) {
+      const current = totals.get(row.userId) ?? 0;
+      totals.set(row.userId, current + this.pointsForRegistration(row));
+    }
+    return totals;
+  }
+
+  /** Overall points from each game when available; otherwise event outcome points. */
+  private pointsForRegistration(row: {
+    pointsEarned: number;
+    eventWins: number;
+    eventLosses: number;
+    eventDraws: number;
+    event: { pointsReward: number; lossPoints: number };
+  }) {
+    const perGamePlayed =
+      row.eventWins + row.eventLosses + row.eventDraws;
+    if (perGamePlayed <= 0) return row.pointsEarned;
+
+    const winPts = row.event.pointsReward;
+    const lossPts = row.event.lossPoints ?? 0;
+    const drawPts = Math.floor(winPts / 2);
+    return (
+      row.eventWins * winPts +
+      row.eventDraws * drawPts +
+      row.eventLosses * lossPts
+    );
   }
 
   async me(user: User) {
@@ -214,7 +516,7 @@ export class UsersService {
         : {}),
     };
 
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         select: {
@@ -243,6 +545,12 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
+    const pointsMap = await this.getTotalPointsByUserIds(rows.map((row) => row.id));
+    const data = rows.map((row) => ({
+      ...row,
+      totalPoints: pointsMap.get(row.id) ?? 0,
+    }));
+
     return {
       data,
       meta: {
@@ -250,6 +558,119 @@ export class UsersService {
         page,
         limit,
         totalPages: Math.ceil(total / limit) || 0,
+      },
+    };
+  }
+
+  private async assertPlayerExists(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true },
+    });
+    if (!user || user.role !== UserRole.PLAYER) {
+      throw new NotFoundException('Player not found.');
+    }
+  }
+
+  private async getChessRatingForUser(userId: string) {
+    const game = await this.prisma.game.findFirst({
+      where: {
+        name: { equals: 'Chess', mode: 'insensitive' },
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!game) return null;
+
+    const rating = await this.prisma.playerGameRating.findUnique({
+      where: {
+        userId_gameId: { userId, gameId: game.id },
+      },
+      select: {
+        rating: true,
+        gamesPlayed: true,
+        wins: true,
+        losses: true,
+        draws: true,
+      },
+    });
+
+    return rating;
+  }
+
+  private toMatchResponse(
+    match: {
+      id: string;
+      boardNumber: number;
+      result: ChessMatchResult | null;
+      status: ChessMatchStatus;
+      completedAt: Date | null;
+      whiteRatingBefore: number | null;
+      whiteRatingAfter: number | null;
+      blackRatingBefore: number | null;
+      blackRatingAfter: number | null;
+      batch?: {
+        batchNumber?: number;
+        round?: {
+          roundNumber: number;
+          event?: { id: string; name: string; sport: string };
+        };
+      };
+      whiteRegistration: {
+        id: string;
+        userId: string;
+        user: {
+          id: string;
+          firstName: string;
+          lastName: string;
+          username: string;
+        };
+      };
+      blackRegistration: {
+        id: string;
+        userId: string;
+        user: {
+          id: string;
+          firstName: string;
+          lastName: string;
+          username: string;
+        };
+      };
+    },
+  ) {
+    const event = match.batch?.round?.event;
+    return {
+      id: match.id,
+      boardNumber: match.boardNumber,
+      batchNumber: match.batch?.batchNumber ?? null,
+      roundNumber: match.batch?.round?.roundNumber ?? null,
+      result: match.result,
+      status: match.status,
+      completedAt: match.completedAt,
+      event: event
+        ? { id: event.id, name: event.name, sport: event.sport }
+        : null,
+      white: {
+        registrationId: match.whiteRegistration.id,
+        userId: match.whiteRegistration.userId,
+        user: match.whiteRegistration.user,
+        ratingBefore: match.whiteRatingBefore,
+        ratingAfter: match.whiteRatingAfter,
+        ratingDelta:
+          match.whiteRatingBefore != null && match.whiteRatingAfter != null
+            ? match.whiteRatingAfter - match.whiteRatingBefore
+            : null,
+      },
+      black: {
+        registrationId: match.blackRegistration.id,
+        userId: match.blackRegistration.userId,
+        user: match.blackRegistration.user,
+        ratingBefore: match.blackRatingBefore,
+        ratingAfter: match.blackRatingAfter,
+        ratingDelta:
+          match.blackRatingBefore != null && match.blackRatingAfter != null
+            ? match.blackRatingAfter - match.blackRatingBefore
+            : null,
       },
     };
   }

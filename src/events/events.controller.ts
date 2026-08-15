@@ -31,6 +31,7 @@ import { SetAttendanceDto } from './dto/set-attendance.dto';
 import { SetEventResultsDto } from './dto/set-event-results.dto';
 import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { RegisterEventDto } from './dto/register-event.dto';
 import {
   eventImageFileFilter,
   eventImageStorage,
@@ -216,7 +217,11 @@ export class EventsController {
   @Roles(UserRole.PLAYER)
   @Post(':id/register')
   @ApiOperation({ summary: 'Register current player for an event' })
-  register(@Param('id') id: string, @CurrentUser() user: Prisma.User) {
-    return this.eventsService.register(id, user);
+  register(
+    @Param('id') id: string,
+    @Body() dto: RegisterEventDto,
+    @CurrentUser() user: Prisma.User,
+  ) {
+    return this.eventsService.register(id, user, dto ?? {});
   }
 }

@@ -118,6 +118,15 @@ export class CreateEventDto {
   pointsReward?: number;
 
   @ApiPropertyOptional({
+    example: 10,
+    description: 'Points deducted on loss. Defaults to game.lossPoints when omitted',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  lossPoints?: number;
+
+  @ApiPropertyOptional({
     example: '/uploads/event-images/123.jpg',
     description: 'URL from POST /events/upload-image',
   })

@@ -17,6 +17,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
 import {
   ageFromDateOfBirth,
   pairForRound,
@@ -31,6 +32,7 @@ export class ChessMatchmakingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ratingService: ChessRatingService,
+    private readonly usersService: UsersService,
   ) {}
 
   async startMatchmaking(
@@ -236,6 +238,20 @@ export class ChessMatchmakingService {
       },
     });
 
+    const ratings =
+      event.gameId != null
+        ? await this.prisma.playerGameRating.findMany({
+            where: {
+              gameId: event.gameId,
+              userId: { in: registrations.map((r) => r.userId) },
+            },
+          })
+        : [];
+    const ratingByUser = new Map(ratings.map((r) => [r.userId, r.rating]));
+    const userIds = registrations.map((r) => r.userId);
+    const totalPointsByUser =
+      await this.usersService.getTotalPointsByUserIds(userIds);
+
     let activeBatch: (typeof event.chessRounds)[number]['batches'][number] | null =
       null;
     let activeRoundNumber = -1;
@@ -287,7 +303,10 @@ export class ChessMatchmakingService {
       playerProgress: registrations.map((r) => ({
         registrationId: r.id,
         userId: r.userId,
-        user: r.user,
+        user: {
+          ...r.user,
+          totalPoints: totalPointsByUser.get(r.userId) ?? 0,
+        },
         withdrawn: !!r.withdrawnAt,
         gamesCompleted: r.gamesCompleted,
         eventWins: r.eventWins,
@@ -295,6 +314,7 @@ export class ChessMatchmakingService {
         eventDraws: r.eventDraws,
         whiteGames: r.whiteGames,
         blackGames: r.blackGames,
+        rating: ratingByUser.get(r.userId) ?? 1000,
       })),
       rounds: event.chessRounds.map((r) => ({
         id: r.id,
@@ -312,7 +332,11 @@ export class ChessMatchmakingService {
   }
 
   async listMatches(eventId: string, user: User) {
-    await this.getChessEventOrThrow(eventId, user, true);
+    const event = await this.getChessEventOrThrow(eventId, user, true);
+
+    if (event.gameId) {
+      await this.backfillMissingRatingSnapshots(event.gameId);
+    }
 
     const matches = await this.prisma.chessMatch.findMany({
       where: {
@@ -425,12 +449,22 @@ export class ChessMatchmakingService {
       });
     });
 
-    await this.ratingService.updateRatingsForMatch(
+    const ratingChange = await this.ratingService.updateRatingsForMatch(
       event.gameId,
       match.whiteRegistration.userId,
       match.blackRegistration.userId,
       result,
     );
+
+    await this.prisma.chessMatch.update({
+      where: { id: matchId },
+      data: {
+        whiteRatingBefore: ratingChange.white.previous,
+        whiteRatingAfter: ratingChange.white.updated,
+        blackRatingBefore: ratingChange.black.previous,
+        blackRatingAfter: ratingChange.black.updated,
+      },
+    });
 
     const updated = await this.prisma.chessMatch.findUniqueOrThrow({
       where: { id: matchId },
@@ -815,7 +849,7 @@ export class ChessMatchmakingService {
     });
 
     const winPts = event.pointsReward;
-    const lossPts = event.game?.lossPoints ?? 0;
+    const lossPts = event.lossPoints ?? 0;
     const drawPts = Math.floor(winPts / 2);
 
     await this.prisma.$transaction(async (tx) => {
@@ -920,6 +954,102 @@ export class ChessMatchmakingService {
     throw new ForbiddenException('Not allowed.');
   }
 
+  private async backfillMissingRatingSnapshots(gameId: string) {
+    const hasMissing = await this.prisma.chessMatch.findFirst({
+      where: {
+        status: ChessMatchStatus.COMPLETED,
+        result: { not: null },
+        whiteRatingAfter: null,
+        batch: { round: { event: { gameId } } },
+      },
+      select: { id: true },
+    });
+    if (!hasMissing) return;
+
+    const matches = await this.prisma.chessMatch.findMany({
+      where: {
+        status: ChessMatchStatus.COMPLETED,
+        result: { not: null },
+        batch: { round: { event: { gameId } } },
+      },
+      include: {
+        whiteRegistration: { select: { userId: true } },
+        blackRegistration: { select: { userId: true } },
+      },
+      orderBy: [{ completedAt: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    type PlayerState = { rating: number; gamesPlayed: number };
+    const playerState = new Map<string, PlayerState>();
+
+    const getState = (userId: string): PlayerState => {
+      let state = playerState.get(userId);
+      if (!state) {
+        state = { rating: 1000, gamesPlayed: 0 };
+        playerState.set(userId, state);
+      }
+      return state;
+    };
+
+    for (const match of matches) {
+      if (
+        match.whiteRatingAfter != null &&
+        match.blackRatingAfter != null &&
+        match.whiteRatingBefore != null &&
+        match.blackRatingBefore != null
+      ) {
+        const white = getState(match.whiteRegistration.userId);
+        white.rating = match.whiteRatingAfter;
+        white.gamesPlayed += 1;
+        const black = getState(match.blackRegistration.userId);
+        black.rating = match.blackRatingAfter;
+        black.gamesPlayed += 1;
+        continue;
+      }
+
+      if (!match.result) continue;
+
+      const whiteUserId = match.whiteRegistration.userId;
+      const blackUserId = match.blackRegistration.userId;
+      const white = getState(whiteUserId);
+      const black = getState(blackUserId);
+
+      const whiteScore = this.ratingService.scoreForResult(true, match.result);
+      const blackScore = this.ratingService.scoreForResult(false, match.result);
+
+      const whiteBefore = white.rating;
+      const blackBefore = black.rating;
+
+      const whiteAfter = this.ratingService.newRating(
+        whiteBefore,
+        blackBefore,
+        whiteScore,
+        white.gamesPlayed,
+      );
+      const blackAfter = this.ratingService.newRating(
+        blackBefore,
+        whiteBefore,
+        blackScore,
+        black.gamesPlayed,
+      );
+
+      white.rating = whiteAfter;
+      white.gamesPlayed += 1;
+      black.rating = blackAfter;
+      black.gamesPlayed += 1;
+
+      await this.prisma.chessMatch.update({
+        where: { id: match.id },
+        data: {
+          whiteRatingBefore: whiteBefore,
+          whiteRatingAfter: whiteAfter,
+          blackRatingBefore: blackBefore,
+          blackRatingAfter: blackAfter,
+        },
+      });
+    }
+  }
+
   private matchInclude() {
     return {
       whiteRegistration: {
@@ -959,6 +1089,10 @@ export class ChessMatchmakingService {
       result: ChessMatchResult | null;
       status: ChessMatchStatus;
       completedAt: Date | null;
+      whiteRatingBefore: number | null;
+      whiteRatingAfter: number | null;
+      blackRatingBefore: number | null;
+      blackRatingAfter: number | null;
       batch?: {
         batchNumber?: number;
         round?: { roundNumber: number };
@@ -1003,11 +1137,23 @@ export class ChessMatchmakingService {
         registrationId: match.whiteRegistration.id,
         userId: match.whiteRegistration.userId,
         user: match.whiteRegistration.user,
+        ratingBefore: match.whiteRatingBefore,
+        ratingAfter: match.whiteRatingAfter,
+        ratingDelta:
+          match.whiteRatingBefore != null && match.whiteRatingAfter != null
+            ? match.whiteRatingAfter - match.whiteRatingBefore
+            : null,
       },
       black: {
         registrationId: match.blackRegistration.id,
         userId: match.blackRegistration.userId,
         user: match.blackRegistration.user,
+        ratingBefore: match.blackRatingBefore,
+        ratingAfter: match.blackRatingAfter,
+        ratingDelta:
+          match.blackRatingBefore != null && match.blackRatingAfter != null
+            ? match.blackRatingAfter - match.blackRatingBefore
+            : null,
       },
       completedBy: match.completedBy ?? null,
     };

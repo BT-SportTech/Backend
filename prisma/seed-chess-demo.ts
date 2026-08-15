@@ -172,6 +172,7 @@ async function main() {
         genders: [],
         fee: 0,
         pointsReward: chess.winPoints,
+        lossPoints: chess.lossPoints,
         boardCount: 4,
         gamesPerPlayer: 3,
         gameId: chess.id,

@@ -262,6 +262,7 @@ model Event {
 
   fee           Float @default(0)
   pointsReward  Int   @default(50)
+  lossPoints    Int   @default(0)
 
   boardCount           Int?
   gamesPerPlayer       Int               @default(3)
@@ -325,6 +326,11 @@ model EventRegistration {
   registeredAt DateTime           @default(now())
   outcome      MatchOutcome?
   pointsEarned Int                @default(0)
+
+  amountPaid     Float    @default(0)
+  paymentRef     String?  @unique
+  paidAt         DateTime?
+  paymentMethod  String?
 
   attendedAt   DateTime?
   attendedById String?
@@ -416,6 +422,10 @@ model ChessMatch {
   status       ChessMatchStatus @default(SCHEDULED)
   completedAt  DateTime?
   completedById String?
+  whiteRatingBefore Int?
+  whiteRatingAfter  Int?
+  blackRatingBefore Int?
+  blackRatingAfter  Int?
 
   batch             ChessRoundBatch   @relation(fields: [batchId], references: [id], onDelete: Cascade)
   whiteRegistration EventRegistration @relation("WhitePlayer", fields: [whiteRegistrationId], references: [id], onDelete: Cascade)

@@ -15,11 +15,13 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { UsersService } from '../users/users.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
 import { SetEventResultsDto } from './dto/set-event-results.dto';
 import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
+import { RegisterEventDto } from './dto/register-event.dto';
 
 const eventInclude = {
   schools: {
@@ -55,10 +57,14 @@ type EventWithRelations = Prisma.EventGetPayload<{ include: typeof eventInclude 
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async create(dto: CreateEventDto, adminId: string) {
     this.assertDateLogic(dto);
+    this.assertZonePairing(dto.state, dto.district);
 
     if (dto.schoolIds?.length) {
       await this.assertSchoolsExist(dto.schoolIds);
@@ -76,6 +82,7 @@ export class EventsService {
       genders,
       fee,
       pointsReward,
+      lossPoints,
       gameId,
       state,
       district,
@@ -100,6 +107,7 @@ export class EventsService {
           genders: genders ?? [],
           fee: fee ?? 0,
           pointsReward: pointsReward ?? game.winPoints,
+          lossPoints: lossPoints ?? game.lossPoints,
           status: EventStatus.DRAFT,
           createdById: adminId,
           gameId: game.id,
@@ -223,6 +231,10 @@ export class EventsService {
         dto.registrationClosesAt ?? event.registrationClosesAt.toISOString(),
     };
     this.assertDateLogic(merged);
+    const mergedState = dto.state !== undefined ? dto.state : event.state;
+    const mergedDistrict =
+      dto.district !== undefined ? dto.district : event.district;
+    this.assertZonePairing(mergedState, mergedDistrict);
 
     if (dto.schoolIds?.length) {
       await this.assertSchoolsExist(dto.schoolIds);
@@ -233,11 +245,13 @@ export class EventsService {
 
     let gameSport: string | undefined;
     let gameWinPoints: number | undefined;
+    let gameLossPoints: number | undefined;
     let resolvedGameName = event.game?.name;
     if (dto.gameId) {
       const game = await this.requireActiveGame(dto.gameId);
       gameSport = game.name;
       gameWinPoints = game.winPoints;
+      gameLossPoints = game.lossPoints;
       resolvedGameName = game.name;
     }
 
@@ -306,6 +320,11 @@ export class EventsService {
             ? { pointsReward: rest.pointsReward }
             : gameWinPoints !== undefined
               ? { pointsReward: gameWinPoints }
+              : {}),
+          ...(rest.lossPoints !== undefined
+            ? { lossPoints: rest.lossPoints }
+            : gameLossPoints !== undefined
+              ? { lossPoints: gameLossPoints }
               : {}),
           ...(rest.imageUrl !== undefined ? { imageUrl: rest.imageUrl } : {}),
           ...(boardCount !== undefined ? { boardCount } : {}),
@@ -395,7 +414,7 @@ export class EventsService {
     }
 
     const winPts = event.pointsReward;
-    const lossPts = event.game?.lossPoints ?? 0;
+    const lossPts = event.lossPoints ?? 0;
     const drawPts = Math.floor(winPts / 2);
 
     await this.prisma.$transaction(async (tx) => {
@@ -451,7 +470,7 @@ export class EventsService {
     }
 
     const winPts = event.pointsReward;
-    const lossPts = event.game?.lossPoints ?? 0;
+    const lossPts = event.lossPoints ?? 0;
     const drawPts = Math.floor(winPts / 2);
     const pointsEarned =
       dto.outcome === MatchOutcome.WIN
@@ -631,6 +650,9 @@ export class EventsService {
           })
         : [];
     const ratingByUser = new Map(chessRatings.map((r) => [r.userId, r]));
+    const userIds = [...new Set(rows.map((r) => r.userId))];
+    const totalPointsByUser =
+      await this.usersService.getTotalPointsByUserIds(userIds);
 
     return {
       eventId,
@@ -654,7 +676,10 @@ export class EventsService {
         whiteGames: r.whiteGames,
         blackGames: r.blackGames,
         chessRating: ratingByUser.get(r.userId)?.rating ?? null,
-        user: r.user,
+        user: {
+          ...r.user,
+          totalPoints: totalPointsByUser.get(r.userId) ?? 0,
+        },
       })),
       attendanceWindowOpen: this.isAttendanceWindowOpen(
         event.startsAt,
@@ -679,7 +704,8 @@ export class EventsService {
       select: { id: true },
     });
     if (found.length !== organizerIds.length) {
-      throw new BadRequestException(
+      this.fieldError(
+        'organizerIds',
         'One or more organizer IDs are invalid or not organizers.',
       );
     }
@@ -781,7 +807,7 @@ export class EventsService {
     };
   }
 
-  async register(eventId: string, user: User) {
+  async register(eventId: string, user: User, dto: RegisterEventDto = {}) {
     if (user.role !== UserRole.PLAYER) {
       throw new ForbiddenException('Only players can register for events.');
     }
@@ -821,6 +847,8 @@ export class EventsService {
       throw new BadRequestException('Event is full.');
     }
 
+    const paymentData = this.buildRegistrationPaymentData(event.fee, dto);
+
     const existing = await this.prisma.eventRegistration.findUnique({
       where: {
         eventId_userId: { eventId, userId: user.id },
@@ -836,25 +864,28 @@ export class EventsService {
         data: {
           status: RegistrationStatus.CONFIRMED,
           registeredAt: new Date(),
+          ...paymentData,
         },
         include: {
-          event: { select: { id: true, name: true, startsAt: true, venue: true } },
+          event: { include: eventInclude },
         },
       });
-      return revived;
+      return this.toRegistrationResponse(revived, event);
     }
 
     try {
-      return await this.prisma.eventRegistration.create({
+      const created = await this.prisma.eventRegistration.create({
         data: {
           eventId,
           userId: user.id,
           status: RegistrationStatus.CONFIRMED,
+          ...paymentData,
         },
         include: {
-          event: { select: { id: true, name: true, startsAt: true, venue: true } },
+          event: { include: eventInclude },
         },
       });
+      return this.toRegistrationResponse(created, event);
     } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -894,14 +925,7 @@ export class EventsService {
     ]);
 
     return {
-      data: data.map((r) => ({
-        id: r.id,
-        status: r.status,
-        registeredAt: r.registeredAt,
-        outcome: r.outcome,
-        pointsEarned: r.pointsEarned,
-        event: this.toEventResponse(r.event, true),
-      })),
+      data: data.map((r) => this.toRegistrationResponse(r, r.event, true)),
       meta: {
         total,
         page,
@@ -927,7 +951,25 @@ export class EventsService {
       where: { id: { in: schoolIds }, isActive: true },
     });
     if (count !== schoolIds.length) {
-      throw new BadRequestException('One or more school IDs are invalid.');
+      this.fieldError('schoolIds', 'One or more school IDs are invalid.');
+    }
+  }
+
+  private fieldError(field: string, message: string): never {
+    throw new BadRequestException({ message, field });
+  }
+
+  private assertZonePairing(
+    state?: string | null,
+    district?: string | null,
+  ) {
+    const hasState = Boolean(state?.trim());
+    const hasDistrict = Boolean(district?.trim());
+    if (hasState !== hasDistrict) {
+      this.fieldError(
+        'state',
+        'Set both state and district for a zone, or leave both empty for nationwide.',
+      );
     }
   }
 
@@ -941,23 +983,29 @@ export class EventsService {
     const opensAt = new Date(dto.registrationOpensAt);
     const closesAt = new Date(dto.registrationClosesAt);
 
-    if (Number.isNaN(startsAt.getTime()) || Number.isNaN(opensAt.getTime()) || Number.isNaN(closesAt.getTime())) {
-      throw new BadRequestException('Invalid date values.');
+    if (
+      Number.isNaN(startsAt.getTime()) ||
+      Number.isNaN(opensAt.getTime()) ||
+      Number.isNaN(closesAt.getTime())
+    ) {
+      this.fieldError('startsAt', 'Invalid date values.');
     }
     if (closesAt < opensAt) {
-      throw new BadRequestException(
+      this.fieldError(
+        'registrationClosesAt',
         'Registration close must be after registration open.',
       );
     }
     if (closesAt > startsAt) {
-      throw new BadRequestException(
+      this.fieldError(
+        'registrationClosesAt',
         'Registration must close on or before the event start.',
       );
     }
     if (dto.endsAt) {
       const endsAt = new Date(dto.endsAt);
       if (Number.isNaN(endsAt.getTime()) || endsAt < startsAt) {
-        throw new BadRequestException('Event end must be after event start.');
+        this.fieldError('endsAt', 'Event end must be after event start.');
       }
     }
   }
@@ -1081,7 +1129,7 @@ export class EventsService {
       where: { id: gameId, isActive: true },
     });
     if (!game) {
-      throw new BadRequestException('Invalid or inactive game.');
+      this.fieldError('gameId', 'Invalid or inactive game.');
     }
     return game;
   }
@@ -1094,7 +1142,8 @@ export class EventsService {
 
   private assertChessBoardCount(gameName: string | undefined, boardCount?: number | null) {
     if (gameName === 'Chess' && (!boardCount || boardCount < 1)) {
-      throw new BadRequestException(
+      this.fieldError(
+        'boardCount',
         'boardCount is required and must be at least 1 for Chess events.',
       );
     }
@@ -1126,6 +1175,72 @@ export class EventsService {
     };
   }
 
+  private buildRegistrationPaymentData(fee: number, dto: RegisterEventDto) {
+    const amountPaid = fee;
+    const isPaid = amountPaid > 0;
+    const paymentRef = isPaid
+      ? (dto.paymentRef?.trim() ||
+          `PAY-${Date.now().toString(36).toUpperCase()}`)
+      : dto.paymentRef?.trim() || null;
+
+    return {
+      amountPaid,
+      paymentRef,
+      paidAt: isPaid ? new Date() : null,
+      paymentMethod: isPaid
+        ? (dto.paymentMethod?.trim().toUpperCase() || 'MOCK')
+        : 'FREE',
+    };
+  }
+
+  private toRegistrationResponse(
+    registration: {
+      id: string;
+      eventId: string;
+      userId: string;
+      status: RegistrationStatus;
+      registeredAt: Date;
+      outcome: MatchOutcome | null;
+      pointsEarned: number;
+      amountPaid: number;
+      paymentRef: string | null;
+      paidAt: Date | null;
+      paymentMethod: string | null;
+      eventWins: number;
+      eventLosses: number;
+      eventDraws: number;
+      gamesCompleted: number;
+    },
+    event: EventWithRelations,
+    includeFullEvent = false,
+  ) {
+    return {
+      id: registration.id,
+      eventId: registration.eventId,
+      userId: registration.userId,
+      status: registration.status,
+      registeredAt: registration.registeredAt,
+      outcome: registration.outcome,
+      pointsEarned: registration.pointsEarned,
+      amountPaid: registration.amountPaid,
+      paymentRef: registration.paymentRef,
+      paidAt: registration.paidAt,
+      paymentMethod: registration.paymentMethod,
+      eventWins: registration.eventWins,
+      eventLosses: registration.eventLosses,
+      eventDraws: registration.eventDraws,
+      gamesCompleted: registration.gamesCompleted,
+      event: includeFullEvent
+        ? this.toEventResponse(event, true)
+        : {
+            id: event.id,
+            name: event.name,
+            startsAt: event.startsAt,
+            venue: event.venue,
+          },
+    };
+  }
+
   private toEventResponse(event: EventWithRelations, isRegistered?: boolean) {
     const registeredCount = event._count.registrations;
     return {
@@ -1152,6 +1267,7 @@ export class EventsService {
       genders: event.genders,
       fee: event.fee,
       pointsReward: event.pointsReward,
+      lossPoints: event.lossPoints,
       boardCount: event.boardCount,
       gamesPerPlayer: event.gamesPerPlayer,
       matchmakingStatus: event.matchmakingStatus,
