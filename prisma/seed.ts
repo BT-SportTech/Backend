@@ -66,7 +66,7 @@ async function main() {
   }
 
   const starters = [
-    { name: 'Chess', sidesPerMatch: 2, playersPerSide: 1, winPoints: 50, lossPoints: 10 },
+    { name: 'Chess', sidesPerMatch: 2, playersPerSide: 1, winPoints: 100, lossPoints: -50 },
     { name: 'Table Tennis', sidesPerMatch: 2, playersPerSide: 1, winPoints: 40, lossPoints: 8 },
     { name: 'Tennis', sidesPerMatch: 2, playersPerSide: 1, winPoints: 50, lossPoints: 10 },
     { name: 'Badminton', sidesPerMatch: 2, playersPerSide: 1, winPoints: 40, lossPoints: 8 },
@@ -77,7 +77,12 @@ async function main() {
     await prisma.game.upsert({
       where: { name: g.name },
       create: g,
-      update: {},
+      update: {
+        winPoints: g.winPoints,
+        lossPoints: g.lossPoints,
+        sidesPerMatch: g.sidesPerMatch,
+        playersPerSide: g.playersPerSide,
+      },
     });
   }
   console.log(`Seeded ${starters.length} starter games.`);

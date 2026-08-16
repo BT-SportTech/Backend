@@ -24,6 +24,12 @@ import {
   PairingPlayer,
 } from './chess-pairing.engine';
 import { ChessRatingService } from './chess-rating.service';
+import {
+  CHESS_DRAW_POINTS,
+  CHESS_LOSS_POINTS,
+  CHESS_STARTING_POINTS,
+  CHESS_WIN_POINTS,
+} from './chess-points';
 
 const CHESS_GAME_NAME = 'Chess';
 
@@ -314,7 +320,7 @@ export class ChessMatchmakingService {
         eventDraws: r.eventDraws,
         whiteGames: r.whiteGames,
         blackGames: r.blackGames,
-        rating: ratingByUser.get(r.userId) ?? 1000,
+        rating: ratingByUser.get(r.userId) ?? CHESS_STARTING_POINTS,
       })),
       rounds: event.chessRounds.map((r) => ({
         id: r.id,
@@ -670,7 +676,7 @@ export class ChessMatchmakingService {
       return {
         registrationId: r.id,
         userId: r.userId,
-        rating: ratingRow?.rating ?? 1000,
+        rating: ratingRow?.rating ?? CHESS_STARTING_POINTS,
         age,
         gamesPlayedOnPlatform: ratingRow?.gamesPlayed ?? 0,
         eventWins: r.eventWins,
@@ -848,10 +854,6 @@ export class ChessMatchmakingService {
       },
     });
 
-    const winPts = event.pointsReward;
-    const lossPts = event.lossPoints ?? 0;
-    const drawPts = Math.floor(winPts / 2);
-
     await this.prisma.$transaction(async (tx) => {
       for (const reg of registrations) {
         let outcome: MatchOutcome;
@@ -864,11 +866,9 @@ export class ChessMatchmakingService {
         }
 
         const pointsEarned =
-          outcome === MatchOutcome.WIN
-            ? winPts
-            : outcome === MatchOutcome.LOSS
-              ? lossPts
-              : drawPts;
+          reg.eventWins * CHESS_WIN_POINTS +
+          reg.eventDraws * CHESS_DRAW_POINTS +
+          reg.eventLosses * CHESS_LOSS_POINTS;
 
         await tx.eventRegistration.update({
           where: { id: reg.id },
@@ -985,7 +985,7 @@ export class ChessMatchmakingService {
     const getState = (userId: string): PlayerState => {
       let state = playerState.get(userId);
       if (!state) {
-        state = { rating: 1000, gamesPlayed: 0 };
+        state = { rating: CHESS_STARTING_POINTS, gamesPlayed: 0 };
         playerState.set(userId, state);
       }
       return state;

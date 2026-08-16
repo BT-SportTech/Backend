@@ -1,3 +1,5 @@
+import { CHESS_STARTING_POINTS } from './chess-points';
+
 export const ROOKIE_GAMES_THRESHOLD = 5;
 export const REMATCH_PENALTY = 10000;
 
@@ -31,7 +33,7 @@ export function effectiveRating(player: PairingPlayer): number {
     return player.rating;
   }
   const ageBonus = Math.min(Math.max((player.age - 15) * 2, 0), 60);
-  return 1000 + ageBonus;
+  return CHESS_STARTING_POINTS + ageBonus;
 }
 
 export function pairingCost(a: PairingPlayer, b: PairingPlayer): number {

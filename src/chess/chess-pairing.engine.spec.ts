@@ -14,7 +14,7 @@ function makePlayer(
 ): PairingPlayer {
   return {
     userId: `user-${overrides.registrationId}`,
-    rating: 1000,
+    rating: 10000,
     age: 20,
     gamesPlayedOnPlatform: 0,
     eventWins: 0,
@@ -42,8 +42,8 @@ describe('ChessPairingEngine', () => {
     it('applies age bonus for rookies', () => {
       const young = makePlayer({ registrationId: 'r1', age: 15 });
       const older = makePlayer({ registrationId: 'r2', age: 45 });
-      expect(effectiveRating(young)).toBe(1000);
-      expect(effectiveRating(older)).toBe(1060);
+      expect(effectiveRating(young)).toBe(10000);
+      expect(effectiveRating(older)).toBe(10060);
     });
   });
 

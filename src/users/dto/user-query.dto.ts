@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { Gender, UserRole } from '@prisma/client';
 import { PaginationQueryDto } from '../../common/dto/pagination.dto';
+import { RANK_TIERS, type RankTier } from '../../common/rank-tier';
 
 export class UserQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -45,4 +46,13 @@ export class UserQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   schoolId?: string;
+
+  @ApiPropertyOptional({
+    enum: RANK_TIERS,
+    example: 'Rookie',
+    description: 'Filter players by points-based rank tier',
+  })
+  @IsOptional()
+  @IsIn([...RANK_TIERS])
+  rank?: RankTier;
 }

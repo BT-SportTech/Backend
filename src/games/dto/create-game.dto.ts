@@ -33,13 +33,12 @@ export class CreateGameDto {
   winPoints?: number;
 
   @ApiPropertyOptional({
-    example: 10,
+    example: -50,
     default: 0,
-    description: 'Points deducted on loss (stored as positive)',
+    description: 'Points applied on loss (may be negative for chess)',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
-  @Min(0)
   lossPoints?: number;
 }

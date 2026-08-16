@@ -1,30 +1,45 @@
 import { Injectable } from '@nestjs/common';
 import { ChessMatchResult } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  CHESS_DRAW_POINTS,
+  CHESS_LOSS_POINTS,
+  CHESS_STARTING_POINTS,
+  CHESS_WIN_POINTS,
+  chessPointsDelta,
+} from './chess-points';
 
-const DEFAULT_RATING = 1000;
+export {
+  CHESS_DRAW_POINTS,
+  CHESS_LOSS_POINTS,
+  CHESS_STARTING_POINTS,
+  CHESS_WIN_POINTS,
+};
 
 @Injectable()
 export class ChessRatingService {
   constructor(private readonly prisma: PrismaService) {}
 
-  expectedScore(ratingA: number, ratingB: number): number {
-    return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
-  }
-
-  kFactor(gamesPlayed: number): number {
-    return gamesPlayed < 30 ? 32 : 16;
+  /** Points delta for a player given match result (fixed, not Elo). */
+  pointsDeltaForResult(
+    isWhite: boolean,
+    result: ChessMatchResult,
+  ): number {
+    const score = this.scoreForResult(isWhite, result);
+    if (score === 1) return chessPointsDelta('win');
+    if (score === 0) return chessPointsDelta('loss');
+    return chessPointsDelta('draw');
   }
 
   newRating(
     currentRating: number,
-    opponentRating: number,
+    _opponentRating: number,
     score: number,
-    gamesPlayed: number,
+    _gamesPlayed: number,
   ): number {
-    const expected = this.expectedScore(currentRating, opponentRating);
-    const k = this.kFactor(gamesPlayed);
-    return Math.round(currentRating + k * (score - expected));
+    if (score === 1) return currentRating + CHESS_WIN_POINTS;
+    if (score === 0) return currentRating + CHESS_LOSS_POINTS;
+    return currentRating + CHESS_DRAW_POINTS;
   }
 
   scoreForResult(
@@ -44,7 +59,7 @@ export class ChessRatingService {
       create: {
         userId,
         gameId,
-        rating: DEFAULT_RATING,
+        rating: CHESS_STARTING_POINTS,
       },
       update: {},
     });

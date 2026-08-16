@@ -6,6 +6,7 @@ import { EventsModule } from './events/events.module';
 import { GamesModule } from './games/games.module';
 import { MailModule } from './mail/mail.module';
 import { OrganizersModule } from './organizers/organizers.module';
+import { PlacesModule } from './places/places.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SchoolsModule } from './schools/schools.module';
 import { UsersModule } from './users/users.module';
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     ChessModule,
     GamesModule,
     OrganizersModule,
+    PlacesModule,
   ],
 })
 export class AppModule {}

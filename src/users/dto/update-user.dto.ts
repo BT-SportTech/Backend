@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsEmail, IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
 import { Gender } from '@prisma/client';
 
 export class UpdateUserDto {
@@ -51,6 +52,18 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   pincode?: string;
+
+  @ApiPropertyOptional({ example: 17.385 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  latitude?: number;
+
+  @ApiPropertyOptional({ example: 78.4867 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  longitude?: number;
 
   @ApiPropertyOptional({
     example: 'clxyz123schoolid',

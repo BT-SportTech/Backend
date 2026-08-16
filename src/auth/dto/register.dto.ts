@@ -6,7 +6,6 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   Max,
   Min,
   MinLength,
@@ -25,14 +24,14 @@ export class RegisterDto {
   @IsNotEmpty()
   lastName: string;
 
-  @ApiProperty({ example: 'rahul_07', description: 'Unique login username' })
-  @IsString()
-  @IsNotEmpty()
-  @MinLength(3)
-  @Matches(/^[a-zA-Z0-9._]+$/, {
-    message: 'Username can only use letters, numbers, . and _',
+  @ApiPropertyOptional({
+    example: 'a7k2m9xq',
+    description:
+      'Deprecated — ignored. Server assigns an 8-character alphanumeric unique code.',
   })
-  username: string;
+  @IsOptional()
+  @IsString()
+  username?: string;
 
   @ApiPropertyOptional({ example: 'rahul@example.com' })
   @IsOptional()

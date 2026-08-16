@@ -3,8 +3,8 @@ import { IsNotEmpty, IsString, MinLength, ValidateIf } from 'class-validator';
 
 export class LoginDto {
   @ApiPropertyOptional({
-    example: 'rahul_07',
-    description: 'Username (preferred for mobile)',
+    example: 'a7k2m9xq',
+    description: 'Unique code (8 alphanumeric) — preferred for mobile login',
   })
   @ValidateIf((o: LoginDto) => !o.email)
   @IsString()

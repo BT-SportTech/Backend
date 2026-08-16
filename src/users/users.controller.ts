@@ -50,7 +50,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'List users with pagination and filters (admin only)',
     description:
-      'Query params: page, limit, search, role, gender, state, district, city, pincode, schoolId',
+      'Query params: page, limit, search, role, gender, state, district, city, pincode, schoolId, rank',
   })
   listAll(@Query() query: UserQueryDto) {
     return this.usersService.listAll(query);

@@ -110,7 +110,7 @@ export class CreateEventDto {
 
   @ApiPropertyOptional({
     example: 50,
-    description: 'Defaults to game.winPoints when omitted',
+    description: 'Defaults to game.winPoints when omitted; Chess always uses 100',
   })
   @IsOptional()
   @IsInt()
@@ -118,12 +118,12 @@ export class CreateEventDto {
   pointsReward?: number;
 
   @ApiPropertyOptional({
-    example: 10,
-    description: 'Points deducted on loss. Defaults to game.lossPoints when omitted',
+    example: -50,
+    description:
+      'Points applied on loss (may be negative). Defaults to game.lossPoints when omitted; Chess always uses -50',
   })
   @IsOptional()
   @IsInt()
-  @Min(0)
   lossPoints?: number;
 
   @ApiPropertyOptional({

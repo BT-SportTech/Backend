@@ -22,6 +22,11 @@ import { SetEventResultsDto } from './dto/set-event-results.dto';
 import { SetRegistrationResultDto } from './dto/set-registration-result.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { RegisterEventDto } from './dto/register-event.dto';
+import {
+  CHESS_DRAW_POINTS,
+  CHESS_LOSS_POINTS,
+  CHESS_WIN_POINTS,
+} from '../chess/chess-points';
 
 const eventInclude = {
   schools: {
@@ -106,8 +111,14 @@ export class EventsService {
           registrationClosesAt: new Date(dto.registrationClosesAt),
           genders: genders ?? [],
           fee: fee ?? 0,
-          pointsReward: pointsReward ?? game.winPoints,
-          lossPoints: lossPoints ?? game.lossPoints,
+          pointsReward:
+            game.name === 'Chess'
+              ? CHESS_WIN_POINTS
+              : (pointsReward ?? game.winPoints),
+          lossPoints:
+            game.name === 'Chess'
+              ? CHESS_LOSS_POINTS
+              : (lossPoints ?? game.lossPoints),
           status: EventStatus.DRAFT,
           createdById: adminId,
           gameId: game.id,
@@ -316,16 +327,23 @@ export class EventsService {
             : {}),
           ...(rest.genders !== undefined ? { genders: rest.genders } : {}),
           ...(rest.fee !== undefined ? { fee: rest.fee } : {}),
-          ...(rest.pointsReward !== undefined
-            ? { pointsReward: rest.pointsReward }
-            : gameWinPoints !== undefined
-              ? { pointsReward: gameWinPoints }
-              : {}),
-          ...(rest.lossPoints !== undefined
-            ? { lossPoints: rest.lossPoints }
-            : gameLossPoints !== undefined
-              ? { lossPoints: gameLossPoints }
-              : {}),
+          ...(resolvedGameName === 'Chess'
+            ? {
+                pointsReward: CHESS_WIN_POINTS,
+                lossPoints: CHESS_LOSS_POINTS,
+              }
+            : {
+                ...(rest.pointsReward !== undefined
+                  ? { pointsReward: rest.pointsReward }
+                  : gameWinPoints !== undefined
+                    ? { pointsReward: gameWinPoints }
+                    : {}),
+                ...(rest.lossPoints !== undefined
+                  ? { lossPoints: rest.lossPoints }
+                  : gameLossPoints !== undefined
+                    ? { lossPoints: gameLossPoints }
+                    : {}),
+              }),
           ...(rest.imageUrl !== undefined ? { imageUrl: rest.imageUrl } : {}),
           ...(boardCount !== undefined ? { boardCount } : {}),
           ...(gamesPerPlayer !== undefined ? { gamesPerPlayer } : {}),
@@ -413,9 +431,10 @@ export class EventsService {
       }
     }
 
-    const winPts = event.pointsReward;
-    const lossPts = event.lossPoints ?? 0;
-    const drawPts = Math.floor(winPts / 2);
+    const isChess = event.game?.name === 'Chess' || event.sport === 'Chess';
+    const winPts = isChess ? CHESS_WIN_POINTS : event.pointsReward;
+    const lossPts = isChess ? CHESS_LOSS_POINTS : (event.lossPoints ?? 0);
+    const drawPts = isChess ? CHESS_DRAW_POINTS : Math.floor(winPts / 2);
 
     await this.prisma.$transaction(async (tx) => {
       for (const item of dto.results) {
@@ -469,9 +488,10 @@ export class EventsService {
       throw new NotFoundException('Registration not found for this event.');
     }
 
-    const winPts = event.pointsReward;
-    const lossPts = event.lossPoints ?? 0;
-    const drawPts = Math.floor(winPts / 2);
+    const isChess = event.game?.name === 'Chess' || event.sport === 'Chess';
+    const winPts = isChess ? CHESS_WIN_POINTS : event.pointsReward;
+    const lossPts = isChess ? CHESS_LOSS_POINTS : (event.lossPoints ?? 0);
+    const drawPts = isChess ? CHESS_DRAW_POINTS : Math.floor(winPts / 2);
     const pointsEarned =
       dto.outcome === MatchOutcome.WIN
         ? winPts

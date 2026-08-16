@@ -173,10 +173,12 @@ model User {
   dateOfBirth DateTime?
 
   // Location
-  state    String?
-  district String?
-  city     String?
-  pincode  String?
+  state     String?
+  district  String?
+  city      String?
+  pincode   String?
+  latitude  Float?
+  longitude Float?
 
   sportsInterested String[]
 
@@ -368,7 +370,7 @@ model PlayerGameRating {
   user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
   game   Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
 
-  rating      Int @default(1000)
+  rating      Int @default(10000)
   gamesPlayed Int @default(0)
   wins        Int @default(0)
   losses      Int @default(0)

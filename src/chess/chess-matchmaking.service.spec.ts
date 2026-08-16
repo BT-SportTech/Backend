@@ -109,6 +109,7 @@ describe('ChessMatchmakingService', () => {
     service = new ChessMatchmakingService(
       prisma as never,
       new ChessRatingService(prisma as never),
+      { getTotalPointsByUserIds: jest.fn() } as never,
     );
   });
 

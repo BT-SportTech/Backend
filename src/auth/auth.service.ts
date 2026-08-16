@@ -6,14 +6,17 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { Prisma, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { User, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { generateUniqueCodeCandidate } from '../common/unique-code';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { OtpService } from './otp.service';
 import { MAX_PROFILES_PER_PHONE } from './profile.constants';
+
+const UNIQUE_CODE_MAX_ATTEMPTS = 24;
 
 @Injectable()
 export class AuthService {
@@ -80,12 +83,6 @@ export class AuthService {
       );
     }
 
-    const username = dto.username.trim().toLowerCase();
-    const usernameTaken = await this.prisma.user.findUnique({
-      where: { username },
-    });
-    if (usernameTaken) throw new BadRequestException('Username is already taken.');
-
     const email = dto.email?.trim().toLowerCase() || null;
     if (email) {
       const emailTaken = await this.prisma.user.findUnique({ where: { email } });
@@ -94,30 +91,71 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    const user = await this.prisma.user.create({
-      data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        username,
-        email,
-        phone: normalizedPhone,
-        passwordHash,
-        role: dto.role,
-        gender: dto.gender,
-        dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
-        state: dto.state,
-        district: dto.district,
-        city: dto.city,
-        pincode: dto.pincode,
-        sportsInterested: dto.sportsInterested ?? [],
-        schoolId: dto.role === UserRole.PLAYER ? dto.schoolId : undefined,
-        presentClass: dto.role === UserRole.PLAYER ? dto.presentClass : undefined,
-        company: dto.role === UserRole.PROFESSIONAL ? dto.company : undefined,
-      },
-    });
+    let user: User | null = null;
+    for (let attempt = 0; attempt < UNIQUE_CODE_MAX_ATTEMPTS; attempt++) {
+      const username = await this.allocateUniqueCode();
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            firstName: dto.firstName,
+            lastName: dto.lastName,
+            username,
+            email,
+            phone: normalizedPhone,
+            passwordHash,
+            role: dto.role,
+            gender: dto.gender,
+            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
+            state: dto.state,
+            district: dto.district,
+            city: dto.city,
+            pincode: dto.pincode,
+            sportsInterested: dto.sportsInterested ?? [],
+            schoolId: dto.role === UserRole.PLAYER ? dto.schoolId : undefined,
+            presentClass:
+              dto.role === UserRole.PLAYER ? dto.presentClass : undefined,
+            company: dto.role === UserRole.PROFESSIONAL ? dto.company : undefined,
+          },
+        });
+        break;
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          const targets = err.meta?.target;
+          const hitUsername =
+            Array.isArray(targets) &&
+            targets.some((t) => String(t).includes('username'));
+          if (hitUsername) continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!user) {
+      throw new BadRequestException(
+        'Could not allocate a unique player code. Please try again.',
+      );
+    }
 
     const tokens = await this.generateTokens(user);
     return { ...tokens, user: this.sanitize(user) };
+  }
+
+  /** Picks an unused 8-character alphanumeric code (stored as `username`). */
+  private async allocateUniqueCode(): Promise<string> {
+    for (let attempt = 0; attempt < UNIQUE_CODE_MAX_ATTEMPTS; attempt++) {
+      const candidate = generateUniqueCodeCandidate();
+      const taken = await this.prisma.user.findUnique({
+        where: { username: candidate },
+        select: { id: true },
+      });
+      if (!taken) return candidate;
+    }
+    throw new BadRequestException(
+      'Could not allocate a unique player code. Please try again.',
+    );
   }
 
   async login(dto: LoginDto) {

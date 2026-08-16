@@ -15,8 +15,14 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_PROFILES_PER_PHONE } from '../auth/profile.constants';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { rankMatchesPoints } from '../common/rank-tier';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
+import {
+  CHESS_DRAW_POINTS,
+  CHESS_LOSS_POINTS,
+  CHESS_WIN_POINTS,
+} from '../chess/chess-points';
 
 @Injectable()
 export class UsersService {
@@ -143,6 +149,8 @@ export class UsersService {
         district: true,
         city: true,
         pincode: true,
+        latitude: true,
+        longitude: true,
         sportsInterested: true,
         schoolId: true,
         presentClass: true,
@@ -343,7 +351,12 @@ export class UsersService {
         eventLosses: true,
         eventDraws: true,
         event: {
-          select: { pointsReward: true, lossPoints: true },
+          select: {
+            pointsReward: true,
+            lossPoints: true,
+            sport: true,
+            game: { select: { name: true } },
+          },
         },
       },
     });
@@ -365,15 +378,26 @@ export class UsersService {
     eventWins: number;
     eventLosses: number;
     eventDraws: number;
-    event: { pointsReward: number; lossPoints: number };
+    event: {
+      pointsReward: number;
+      lossPoints: number;
+      sport: string;
+      game?: { name: string } | null;
+    };
   }) {
     const perGamePlayed =
       row.eventWins + row.eventLosses + row.eventDraws;
     if (perGamePlayed <= 0) return row.pointsEarned;
 
-    const winPts = row.event.pointsReward;
-    const lossPts = row.event.lossPoints ?? 0;
-    const drawPts = Math.floor(winPts / 2);
+    const isChess =
+      row.event.game?.name === 'Chess' || row.event.sport === 'Chess';
+    const winPts = isChess ? CHESS_WIN_POINTS : row.event.pointsReward;
+    const lossPts = isChess
+      ? CHESS_LOSS_POINTS
+      : (row.event.lossPoints ?? 0);
+    const drawPts = isChess
+      ? CHESS_DRAW_POINTS
+      : Math.floor(winPts / 2);
     return (
       row.eventWins * winPts +
       row.eventDraws * drawPts +
@@ -477,6 +501,8 @@ export class UsersService {
         district: dto.district,
         city: dto.city,
         pincode: dto.pincode,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
         sportsInterested: dto.sportsInterested,
         ...(companyUpdate !== undefined ? { company: companyUpdate } : {}),
         ...(schoolIdUpdate !== undefined ? { schoolId: schoolIdUpdate } : {}),
@@ -516,28 +542,75 @@ export class UsersService {
         : {}),
     };
 
+    const listSelect = {
+      id: true,
+      firstName: true,
+      lastName: true,
+      username: true,
+      email: true,
+      phone: true,
+      role: true,
+      gender: true,
+      city: true,
+      district: true,
+      state: true,
+      pincode: true,
+      latitude: true,
+      longitude: true,
+      schoolId: true,
+      presentClass: true,
+      company: true,
+      createdAt: true,
+      school: { select: { id: true, name: true } },
+    } as const;
+
+    if (query.rank) {
+      const matched = await this.prisma.user.findMany({
+        where,
+        select: { id: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      const pointsMap = await this.getTotalPointsByUserIds(
+        matched.map((row) => row.id),
+      );
+      const filteredIds = matched
+        .filter((row) =>
+          rankMatchesPoints(query.rank!, pointsMap.get(row.id) ?? 0),
+        )
+        .map((row) => row.id);
+
+      const total = filteredIds.length;
+      const pageIds = filteredIds.slice(skip, skip + limit);
+      const rows =
+        pageIds.length === 0
+          ? []
+          : await this.prisma.user.findMany({
+              where: { id: { in: pageIds } },
+              select: listSelect,
+            });
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const ordered = pageIds
+        .map((id) => byId.get(id))
+        .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+      return {
+        data: ordered.map((row) => ({
+          ...row,
+          totalPoints: pointsMap.get(row.id) ?? 0,
+        })),
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 0,
+        },
+      };
+    }
+
     const [rows, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          username: true,
-          email: true,
-          phone: true,
-          role: true,
-          gender: true,
-          city: true,
-          district: true,
-          state: true,
-          pincode: true,
-          schoolId: true,
-          presentClass: true,
-          company: true,
-          createdAt: true,
-          school: { select: { id: true, name: true } },
-        },
+        select: listSelect,
         orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
