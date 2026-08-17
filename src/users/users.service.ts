@@ -15,6 +15,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_PROFILES_PER_PHONE } from '../auth/profile.constants';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { formatDisplayName } from '../common/display-name';
 import { rankMatchesPoints } from '../common/rank-tier';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserQueryDto } from './dto/user-query.dto';
@@ -29,15 +30,13 @@ export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   isProfileComplete(user: {
-    email: string | null;
     gender: string | null;
     dateOfBirth: Date | null;
     city: string | null;
     state: string | null;
   }) {
     return Boolean(
-      user.email?.trim() &&
-        user.gender &&
+      user.gender &&
         user.dateOfBirth &&
         (user.city?.trim() || user.state?.trim()),
     );
@@ -436,7 +435,7 @@ export class UsersService {
     const phoneProfiles = siblings.map((u) => ({
       id: u.id,
       username: u.username,
-      displayName: `${u.firstName} ${u.lastName}`.trim(),
+      displayName: formatDisplayName(u.firstName, u.lastName),
       isCurrent: u.id === fresh.id,
     }));
 
@@ -491,8 +490,12 @@ export class UsersService {
     const updated = await this.prisma.user.update({
       where: { id: user.id },
       data: {
-        firstName: dto.firstName,
-        lastName: dto.lastName,
+        ...(dto.firstName !== undefined
+          ? { firstName: dto.firstName.trim(), lastName: '' }
+          : {}),
+        ...(dto.lastName !== undefined && dto.firstName === undefined
+          ? { lastName: dto.lastName }
+          : {}),
         email: emailUpdate,
         phone: dto.phone,
         gender: dto.gender,

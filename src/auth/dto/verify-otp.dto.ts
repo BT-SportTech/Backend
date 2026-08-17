@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Length, Matches } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, Length, Matches } from 'class-validator';
 
 export class VerifyOtpDto {
   @ApiProperty({
@@ -15,11 +15,12 @@ export class VerifyOtpDto {
 
   @ApiProperty({
     example: '5D6EBEE6-EC04-4776-846D-3600422BD9EF',
-    description: 'Session id returned from send OTP',
+    description: 'Session id returned from send OTP (optional when using VERIFY3)',
+    required: false,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  sessionId: string;
+  sessionId?: string;
 
   @ApiProperty({ example: '123456', description: '6-digit OTP from SMS' })
   @IsString()

@@ -5,6 +5,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetMpinDto } from './dto/reset-mpin.dto';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { OtpService } from './otp.service';
@@ -19,14 +20,20 @@ export class AuthController {
 
   @Post('otp/send')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Send registration OTP via SMS only (2Factor SMS API)' })
+  @ApiOperation({
+    summary:
+      'Send OTP via SMS (2Factor SMS API) — used for registration and MPIN reset',
+  })
   sendOtp(@Body() dto: SendOtpDto) {
     return this.otpService.sendOtp(dto.phone, dto.template);
   }
 
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Verify registration OTP and return profiles for phone' })
+  @ApiOperation({
+    summary:
+      'Verify OTP and return profiles for phone — used for registration and MPIN reset',
+  })
   async verifyOtp(@Body() dto: VerifyOtpDto) {
     const verified = await this.otpService.verifyOtp(
       dto.phone,
@@ -48,6 +55,15 @@ export class AuthController {
   @ApiOperation({ summary: 'Login with username or email and password' })
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('mpin/reset')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset MPIN for a phone-linked profile (requires OTP-verified phone)',
+  })
+  resetMpin(@Body() dto: ResetMpinDto) {
+    return this.authService.resetMpin(dto);
   }
 
   @Post('refresh')

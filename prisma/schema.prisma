@@ -125,8 +125,8 @@ model School {
   hasSwimmingPool    Boolean  @default(false)
   hasIndoorSportsArena Boolean @default(false)
 
-  // 7. Faculty (non-duplicate)
-  sportsInstructor String?
+  // 7. Faculty
+  sportsInstructors Json?
 
   // 8. Student counts
   totalStudents  Int?

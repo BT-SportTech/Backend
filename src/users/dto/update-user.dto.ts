@@ -4,12 +4,15 @@ import { IsEmail, IsEnum, IsNumber, IsOptional, IsString } from 'class-validator
 import { Gender } from '@prisma/client';
 
 export class UpdateUserDto {
-  @ApiPropertyOptional({ example: 'Rahul' })
+  @ApiPropertyOptional({ example: 'Rahul Sharma', description: 'Full name' })
   @IsOptional()
   @IsString()
   firstName?: string;
 
-  @ApiPropertyOptional({ example: 'Sharma' })
+  @ApiPropertyOptional({
+    example: '',
+    description: 'Deprecated — leave empty; full name is stored in firstName',
+  })
   @IsOptional()
   @IsString()
   lastName?: string;

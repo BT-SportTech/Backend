@@ -562,6 +562,26 @@ export class EventsService {
     };
   }
 
+  async findHistoryForOrganizer(user: User) {
+    if (user.role !== UserRole.ORGANIZER) {
+      throw new ForbiddenException('Only organizers can list assigned events.');
+    }
+
+    const rows = await this.prisma.event.findMany({
+      where: {
+        status: { in: [EventStatus.COMPLETED, EventStatus.CANCELLED] },
+        organizers: { some: { userId: user.id } },
+      },
+      include: eventInclude,
+      orderBy: { startsAt: 'desc' },
+    });
+
+    return {
+      data: rows.map((e) => this.toEventResponse(e)),
+      meta: { total: rows.length },
+    };
+  }
+
   async setAttendance(
     eventId: string,
     registrationId: string,

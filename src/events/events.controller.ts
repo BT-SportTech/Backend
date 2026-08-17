@@ -119,6 +119,16 @@ export class EventsController {
     return this.eventsService.findMineForOrganizer(user);
   }
 
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ORGANIZER)
+  @Get('organizer/history')
+  @ApiOperation({
+    summary: 'List completed and cancelled events assigned to the organizer',
+  })
+  organizerHistory(@CurrentUser() user: Prisma.User) {
+    return this.eventsService.findHistoryForOrganizer(user);
+  }
+
   @UseGuards(JwtAuthGuard)
   @Get(':id')
   @ApiOperation({ summary: 'Get event detail (admin, organizer, or eligible player)' })

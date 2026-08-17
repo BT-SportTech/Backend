@@ -7,7 +7,7 @@ async function main() {
   const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
   const prisma = new PrismaClient({ adapter });
 
-  const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@sporttech.com';
+  const adminEmail = process.env.ADMIN_EMAIL ?? 'admin@sportech.com';
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'Admin@123';
   const adminUsername = 'admin';
 

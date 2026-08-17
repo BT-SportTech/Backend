@@ -1,12 +1,18 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, MinLength, ValidateIf } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  Matches,
+  MinLength,
+  ValidateIf,
+} from 'class-validator';
 
 export class LoginDto {
   @ApiPropertyOptional({
     example: 'a7k2m9xq',
-    description: 'Unique code (8 alphanumeric) — preferred for mobile login',
+    description: 'Unique code (8 alphanumeric)',
   })
-  @ValidateIf((o: LoginDto) => !o.email)
+  @ValidateIf((o: LoginDto) => !o.email && !o.phone)
   @IsString()
   @IsNotEmpty()
   username?: string;
@@ -15,10 +21,22 @@ export class LoginDto {
     example: 'admin@Sportech.com',
     description: 'Email (accepted for admin/web login)',
   })
-  @ValidateIf((o: LoginDto) => !o.username)
+  @ValidateIf((o: LoginDto) => !o.username && !o.phone)
   @IsString()
   @IsNotEmpty()
   email?: string;
+
+  @ApiPropertyOptional({
+    example: '9876543210',
+    description: 'Mobile number — preferred for player login',
+  })
+  @ValidateIf((o: LoginDto) => !o.username && !o.email)
+  @IsString()
+  @IsNotEmpty()
+  @Matches(/^\+?[0-9]{10,15}$/, {
+    message: 'Enter a valid phone number',
+  })
+  phone?: string;
 
   @ApiPropertyOptional({ example: 'Admin@123', minLength: 6 })
   @IsString()

@@ -5,6 +5,21 @@ import { CreateSchoolDto } from './dto/create-school.dto';
 import { SchoolQueryDto } from './dto/school-query.dto';
 import { UpdateSchoolDto } from './dto/update-school.dto';
 
+function toSchoolWriteData(
+  dto: CreateSchoolDto | UpdateSchoolDto,
+): Prisma.SchoolCreateInput | Prisma.SchoolUpdateInput {
+  const { sportsInstructors, ...rest } = dto;
+  return {
+    ...rest,
+    ...(sportsInstructors !== undefined
+      ? {
+          sportsInstructors:
+            sportsInstructors as unknown as Prisma.InputJsonValue,
+        }
+      : {}),
+  };
+}
+
 @Injectable()
 export class SchoolsService {
   constructor(private readonly prisma: PrismaService) {}
@@ -12,7 +27,9 @@ export class SchoolsService {
   async create(dto: CreateSchoolDto) {
     const existing = await this.prisma.school.findUnique({ where: { code: dto.code } });
     if (existing) throw new ConflictException('School code already registered.');
-    return this.prisma.school.create({ data: dto });
+    return this.prisma.school.create({
+      data: toSchoolWriteData(dto) as Prisma.SchoolCreateInput,
+    });
   }
 
   async findAll(query: SchoolQueryDto) {
@@ -86,7 +103,10 @@ export class SchoolsService {
 
   async update(id: string, dto: UpdateSchoolDto) {
     await this.findOne(id);
-    return this.prisma.school.update({ where: { id }, data: dto });
+    return this.prisma.school.update({
+      where: { id },
+      data: toSchoolWriteData(dto) as Prisma.SchoolUpdateInput,
+    });
   }
 
   async deactivate(id: string) {

@@ -8,21 +8,24 @@ import {
   IsString,
   Max,
   Min,
-  MinLength,
+  Matches,
   ValidateIf,
 } from 'class-validator';
 import { Gender } from '@prisma/client';
 
 export class RegisterDto {
-  @ApiProperty({ example: 'Rahul' })
+  @ApiProperty({ example: 'Rahul Sharma', description: 'Full name' })
   @IsString()
   @IsNotEmpty()
   firstName: string;
 
-  @ApiProperty({ example: 'Sharma' })
+  @ApiPropertyOptional({
+    example: '',
+    description: 'Deprecated — leave empty; full name is stored in firstName',
+  })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  lastName: string;
+  lastName?: string;
 
   @ApiPropertyOptional({
     example: 'a7k2m9xq',
@@ -38,9 +41,9 @@ export class RegisterDto {
   @IsEmail()
   email?: string;
 
-  @ApiProperty({ example: 'Secret@123', minLength: 6 })
+  @ApiProperty({ example: '123456', description: '6-digit Mpin' })
   @IsString()
-  @MinLength(6)
+  @Matches(/^\d{6}$/, { message: 'Mpin must be exactly 6 digits' })
   password: string;
 
   @ApiProperty({ example: '9876543210' })

@@ -22,7 +22,8 @@
     "prisma:seed": "tsx -r dotenv/config prisma/seed.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:backfill-unique-codes": "tsx -r dotenv/config prisma/backfill-unique-codes.ts"
+    "prisma:backfill-unique-codes": "tsx -r dotenv/config prisma/backfill-unique-codes.ts",
+    "prisma:clean": "tsx -r dotenv/config prisma/clean-db.ts"
   },
   "prisma": {
     "seed": "tsx -r dotenv/config prisma/seed.ts"

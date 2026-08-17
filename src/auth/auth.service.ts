@@ -11,8 +11,10 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { generateUniqueCodeCandidate } from '../common/unique-code';
+import { formatDisplayName } from '../common/display-name';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetMpinDto } from './dto/reset-mpin.dto';
 import { OtpService } from './otp.service';
 import { MAX_PROFILES_PER_PHONE } from './profile.constants';
 
@@ -47,7 +49,7 @@ export class AuthService {
       profiles: users.map((u) => ({
         id: u.id,
         username: u.username,
-        displayName: `${u.firstName} ${u.lastName}`.trim(),
+        displayName: formatDisplayName(u.firstName, u.lastName),
       })),
     };
   }
@@ -97,8 +99,8 @@ export class AuthService {
       try {
         user = await this.prisma.user.create({
           data: {
-            firstName: dto.firstName,
-            lastName: dto.lastName,
+            firstName: dto.firstName.trim(),
+            lastName: '',
             username,
             email,
             phone: normalizedPhone,
@@ -159,6 +161,37 @@ export class AuthService {
   }
 
   async login(dto: LoginDto) {
+    if (dto.phone) {
+      if (!/^\d{6}$/.test(dto.password)) {
+        throw new UnauthorizedException('Invalid credentials.');
+      }
+
+      const normalized = this.otp.normalizePhone(dto.phone);
+      const users = await this.prisma.user.findMany({
+        where: { phone: normalized },
+      });
+      if (!users.length) {
+        throw new UnauthorizedException('Invalid credentials.');
+      }
+
+      const matches: User[] = [];
+      for (const candidate of users) {
+        const valid = await bcrypt.compare(dto.password, candidate.passwordHash);
+        if (valid) matches.push(candidate);
+      }
+      if (!matches.length) {
+        throw new UnauthorizedException('Invalid credentials.');
+      }
+      if (matches.length > 1) {
+        throw new UnauthorizedException(
+          'Multiple profiles use this Mpin. Contact support.',
+        );
+      }
+
+      const tokens = await this.generateTokens(matches[0]);
+      return { ...tokens, user: this.sanitize(matches[0]) };
+    }
+
     const identity = (dto.username ?? dto.email ?? '').trim().toLowerCase();
     if (!identity) throw new UnauthorizedException('Invalid credentials.');
 
@@ -173,6 +206,32 @@ export class AuthService {
 
     const tokens = await this.generateTokens(user);
     return { ...tokens, user: this.sanitize(user) };
+  }
+
+  async resetMpin(dto: ResetMpinDto) {
+    if (!this.otp.isPhoneVerified(dto.phone)) {
+      throw new BadRequestException(
+        'Phone number must be verified with OTP first.',
+      );
+    }
+
+    const normalizedPhone = this.otp.normalizePhone(dto.phone);
+    const user = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+    });
+
+    if (!user || user.phone !== normalizedPhone) {
+      throw new BadRequestException('Invalid profile for this phone number.');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const updated = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    const tokens = await this.generateTokens(updated);
+    return { ...tokens, user: this.sanitize(updated) };
   }
 
   async refresh(rawToken: string) {

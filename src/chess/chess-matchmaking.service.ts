@@ -95,6 +95,10 @@ export class ChessMatchmakingService {
   async nextBatch(eventId: string, user: User) {
     const event = await this.getChessEventOrThrow(eventId, user);
 
+    if (event.matchmakingStatus === MatchmakingStatus.COMPLETED) {
+      return this.getStatus(eventId, user);
+    }
+
     if (event.matchmakingStatus !== MatchmakingStatus.IN_PROGRESS) {
       throw new BadRequestException(
         'Matchmaking is not in progress for this event.',
@@ -103,6 +107,14 @@ export class ChessMatchmakingService {
 
     const activeBatch = await this.getActiveBatch(eventId);
     if (!activeBatch) {
+      const playersNeedingMore = await this.countPlayersNeedingMoreGames(
+        eventId,
+        event.gamesPerPlayer,
+      );
+      if (playersNeedingMore === 0) {
+        await this.finalizeMatchmaking(eventId);
+        return this.getStatus(eventId, user);
+      }
       throw new BadRequestException('No active batch found.');
     }
 
@@ -171,9 +183,24 @@ export class ChessMatchmakingService {
     if (playersNeedingMore > 0) {
       const nextRoundNumber = round.roundNumber + 1;
       if (nextRoundNumber > event.gamesPerPlayer) {
-        throw new BadRequestException(
-          'Some players have not completed all required games.',
+        const lastBatchNumber = await this.prisma.chessRoundBatch.count({
+          where: { roundId: round.id },
+        });
+        await this.prisma.chessRound.update({
+          where: { id: round.id },
+          data: { status: ChessRoundStatus.ACTIVE },
+        });
+        const batch = await this.generateBatch(
+          eventId,
+          round.id,
+          round.roundNumber,
+          lastBatchNumber + 1,
+          boardCount,
         );
+        if (batch.byePlayer) {
+          await this.grantBye(batch.byePlayer.registrationId);
+        }
+        return { ...batch, byeGranted };
       }
 
       const nextRound = await this.prisma.chessRound.create({
@@ -844,6 +871,10 @@ export class ChessMatchmakingService {
       where: { id: eventId },
       include: { game: true },
     });
+
+    if (event.matchmakingStatus === MatchmakingStatus.COMPLETED) {
+      return;
+    }
 
     const registrations = await this.prisma.eventRegistration.findMany({
       where: {

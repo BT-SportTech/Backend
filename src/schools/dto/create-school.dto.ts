@@ -1,13 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
-  IsNumber,
+  ValidateNested,
 } from 'class-validator';
 import { SchoolType } from '@prisma/client';
+import { SportsInstructorDto } from './sports-instructor.dto';
 
 export class CreateSchoolDto {
   // 1. Basic
@@ -147,10 +151,15 @@ export class CreateSchoolDto {
   hasIndoorSportsArena?: boolean;
 
   // 7. Faculty
-  @ApiPropertyOptional({ example: 'Coach Ravi Kumar' })
+  @ApiPropertyOptional({
+    type: [SportsInstructorDto],
+    example: [{ name: 'Coach Ravi Kumar', phone: '+91 98765 43210' }],
+  })
   @IsOptional()
-  @IsString()
-  sportsInstructor?: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SportsInstructorDto)
+  sportsInstructors?: SportsInstructorDto[];
 
   // 8. Student counts
   @ApiPropertyOptional({ example: 2500 })

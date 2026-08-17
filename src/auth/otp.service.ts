@@ -5,7 +5,6 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { randomInt } from 'crypto';
 
 type TwoFactorResponse = {
   Status?: string;
@@ -18,11 +17,10 @@ type TwoFactorResponse = {
  *
  * Correct SMS endpoints (GET, no body):
  *   Send (auto):   https://2factor.in/API/V1/{API_KEY}/SMS/{91XXXXXXXXXX}/AUTOGEN
- *   Send (custom): https://2factor.in/API/V1/{API_KEY}/SMS/{91XXXXXXXXXX}/{OTP}
  *   Send + SMS template:
  *                  https://2factor.in/API/V1/{API_KEY}/SMS/{91XXXXXXXXXX}/AUTOGEN/{SMS_TEMPLATE_NAME}
- *                  https://2factor.in/API/V1/{API_KEY}/SMS/{91XXXXXXXXXX}/{OTP}/{SMS_TEMPLATE_NAME}
- *   Verify:        https://2factor.in/API/V1/{API_KEY}/SMS/VERIFY/{SESSION_ID}/{OTP}
+ *   Verify (VERIFY3):
+ *                  https://2factor.in/API/V1/{API_KEY}/SMS/VERIFY3/{91XXXXXXXXXX}/{OTP}
  *
  * Voice endpoint (DO NOT USE):
  *   https://2factor.in/API/V1/{API_KEY}/VOICE/{91XXXXXXXXXX}/AUTOGEN
@@ -65,18 +63,17 @@ export class OtpService {
 
   /**
    * Send OTP via SMS only.
-   * Uses custom OTP + SMS path so delivery cannot go through /VOICE/.
+   * Uses AUTOGEN so 2Factor generates the 6-digit OTP.
    */
   async sendOtp(phone: string, template?: string) {
     const normalized = this.normalizePhone(phone);
     const apiKey = this.requireApiKey();
     const templateName = this.resolveSmsTemplate(template);
-    const otp = this.generateOtp();
 
-    // SMS-only path. Never /VOICE/.
+    // SMS-only AUTOGEN path. Never /VOICE/.
     const path = templateName
-      ? `/API/V1/${apiKey}/SMS/${normalized}/${otp}/${encodeURIComponent(templateName)}`
-      : `/API/V1/${apiKey}/SMS/${normalized}/${otp}`;
+      ? `/API/V1/${apiKey}/SMS/${normalized}/AUTOGEN/${encodeURIComponent(templateName)}`
+      : `/API/V1/${apiKey}/SMS/${normalized}/AUTOGEN`;
 
     this.logger.log(
       `Sending SMS OTP to ${normalized}` +
@@ -96,17 +93,20 @@ export class OtpService {
     };
   }
 
-  async verifyOtp(phone: string, sessionId: string, otp: string) {
+  /**
+   * Verify OTP using 2Factor VERIFY3 endpoint (phone_number + otp_entered_by_user).
+   * Endpoint: GET https://2factor.in/API/V1/:api_key/SMS/VERIFY3/:phone_number/:otp_entered_by_user
+   */
+  async verifyOtp(phone: string, sessionIdOrOtp?: string, otpParam?: string) {
     const normalized = this.normalizePhone(phone);
     const apiKey = this.requireApiKey();
-    const cleanSession = sessionId.trim();
-    const cleanOtp = otp.trim();
+    const cleanOtp = (otpParam || sessionIdOrOtp || '').trim();
 
-    if (!cleanSession) {
-      throw new BadRequestException('OTP session is missing. Request a new OTP.');
+    if (!cleanOtp) {
+      throw new BadRequestException('OTP value is required.');
     }
 
-    const path = `/API/V1/${apiKey}/SMS/VERIFY/${encodeURIComponent(cleanSession)}/${encodeURIComponent(cleanOtp)}`;
+    const path = `/API/V1/${apiKey}/SMS/VERIFY3/${normalized}/${encodeURIComponent(cleanOtp)}`;
     const data = await this.callTwoFactor(path);
 
     if (data.Status !== 'Success') {
@@ -120,10 +120,6 @@ export class OtpService {
       phone: normalized,
       message: data.Details || 'OTP Matched',
     };
-  }
-
-  private generateOtp(): string {
-    return String(randomInt(100000, 1000000));
   }
 
   /**
