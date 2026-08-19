@@ -28,9 +28,9 @@ export class RegisterDto {
   lastName?: string;
 
   @ApiPropertyOptional({
-    example: 'a7k2m9xq',
+    example: '12345678',
     description:
-      'Deprecated — ignored. Server assigns an 8-character alphanumeric unique code.',
+      'Deprecated — ignored. Server assigns an 8-digit numeric unique code.',
   })
   @IsOptional()
   @IsString()

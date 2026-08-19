@@ -9,8 +9,8 @@ import {
 
 export class LoginDto {
   @ApiPropertyOptional({
-    example: 'a7k2m9xq',
-    description: 'Unique code (8 alphanumeric)',
+    example: '12345678',
+    description: '8-digit numeric unique code',
   })
   @ValidateIf((o: LoginDto) => !o.email && !o.phone)
   @IsString()

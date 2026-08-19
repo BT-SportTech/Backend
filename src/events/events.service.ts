@@ -681,6 +681,7 @@ export class EventsService {
             id: true,
             firstName: true,
             lastName: true,
+            username: true,
           },
         },
       },

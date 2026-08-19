@@ -17,16 +17,16 @@ import * as bcrypt from 'bcrypt';
 const PLAYER_PASSWORD = 'Player@123';
 
 const players = [
-  { firstName: 'Aarav', lastName: 'Sharma', username: 'aarav_chess', age: 14 },
-  { firstName: 'Diya', lastName: 'Patel', username: 'diya_chess', age: 15 },
-  { firstName: 'Kabir', lastName: 'Reddy', username: 'kabir_chess', age: 16 },
-  { firstName: 'Ananya', lastName: 'Iyer', username: 'ananya_chess', age: 17 },
-  { firstName: 'Rohan', lastName: 'Mehta', username: 'rohan_chess', age: 18 },
-  { firstName: 'Ishita', lastName: 'Nair', username: 'ishita_chess', age: 22 },
-  { firstName: 'Vikram', lastName: 'Singh', username: 'vikram_chess', age: 28 },
-  { firstName: 'Meera', lastName: 'Kapoor', username: 'meera_chess', age: 35 },
-  { firstName: 'Arjun', lastName: 'Das', username: 'arjun_chess', age: 42 },
-  { firstName: 'Sneha', lastName: 'Joshi', username: 'sneha_chess', age: 45 },
+  { firstName: 'Aarav', lastName: 'Sharma', uniqueCode: '10000001', age: 14 },
+  { firstName: 'Diya', lastName: 'Patel', uniqueCode: '10000002', age: 15 },
+  { firstName: 'Kabir', lastName: 'Reddy', uniqueCode: '10000003', age: 16 },
+  { firstName: 'Ananya', lastName: 'Iyer', uniqueCode: '10000004', age: 17 },
+  { firstName: 'Rohan', lastName: 'Mehta', uniqueCode: '10000005', age: 18 },
+  { firstName: 'Ishita', lastName: 'Nair', uniqueCode: '10000006', age: 22 },
+  { firstName: 'Vikram', lastName: 'Singh', uniqueCode: '10000007', age: 28 },
+  { firstName: 'Meera', lastName: 'Kapoor', uniqueCode: '10000008', age: 35 },
+  { firstName: 'Arjun', lastName: 'Das', uniqueCode: '10000009', age: 42 },
+  { firstName: 'Sneha', lastName: 'Joshi', uniqueCode: '10000010', age: 45 },
 ] as const;
 
 function dobFromAge(age: number): Date {
@@ -93,22 +93,76 @@ async function main() {
   const passwordHash = await bcrypt.hash(PLAYER_PASSWORD, 10);
   const playerIds: string[] = [];
 
+  async function nextSequenceCode(): Promise<string> {
+    const rows = await prisma.$queryRaw<{ code: string }[]>`
+      SELECT lpad(nextval('player_unique_code_seq')::text, 8, '0') AS code
+    `;
+    return rows[0]!.code;
+  }
+
+  async function assignDemoUsername(userId: string, uniqueCode: string) {
+    const holder = await prisma.user.findUnique({
+      where: { username: uniqueCode },
+    });
+    if (holder && holder.id !== userId) {
+      const replacement = await nextSequenceCode();
+      await prisma.user.update({
+        where: { id: holder.id },
+        data: { username: replacement },
+      });
+      console.log(
+        `  Moved ${holder.firstName} ${holder.lastName} from ${uniqueCode} → ${replacement}`,
+      );
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        username: uniqueCode,
+        email: `${uniqueCode}@demo.sporttech.com`,
+      },
+    });
+  }
+
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
-    const existing = await prisma.user.findUnique({
-      where: { username: p.username },
+    let existing = await prisma.user.findFirst({
+      where: {
+        firstName: p.firstName,
+        lastName: p.lastName,
+        role: UserRole.PLAYER,
+        email: { endsWith: '@demo.sporttech.com' },
+      },
     });
+
     if (existing) {
+      if (existing.username !== p.uniqueCode) {
+        await assignDemoUsername(existing.id, p.uniqueCode);
+        console.log(
+          `Updated demo player code: ${p.firstName} ${p.lastName} → ${p.uniqueCode}`,
+        );
+      }
       playerIds.push(existing.id);
-      console.log(`Player exists: ${p.username}`);
+      console.log(`Player exists: ${p.uniqueCode} (${p.firstName} ${p.lastName})`);
       continue;
     }
+
+    const holder = await prisma.user.findUnique({
+      where: { username: p.uniqueCode },
+    });
+    if (holder) {
+      const replacement = await nextSequenceCode();
+      await prisma.user.update({
+        where: { id: holder.id },
+        data: { username: replacement },
+      });
+    }
+
     const created = await prisma.user.create({
       data: {
         firstName: p.firstName,
         lastName: p.lastName,
-        username: p.username,
-        email: `${p.username}@demo.sporttech.com`,
+        username: p.uniqueCode,
+        email: `${p.uniqueCode}@demo.sporttech.com`,
         passwordHash,
         role: UserRole.PLAYER,
         gender: i % 2 === 0 ? Gender.MALE : Gender.FEMALE,
@@ -120,7 +174,9 @@ async function main() {
       },
     });
     playerIds.push(created.id);
-    console.log(`Created player: ${p.username} (age ${p.age})`);
+    console.log(
+      `Created player: ${p.uniqueCode} (${p.firstName} ${p.lastName}, age ${p.age})`,
+    );
   }
 
   // Attendance opens 30 min before start — set start to ~10 min from now
@@ -231,6 +287,24 @@ async function main() {
     where: { round: { eventId } },
   });
   await prisma.chessRound.deleteMany({ where: { eventId } });
+
+  await prisma.$executeRaw`
+    SELECT setval(
+      'player_unique_code_seq',
+      GREATEST(
+        10000011,
+        COALESCE(
+          (
+            SELECT MAX(username::bigint)
+            FROM "User"
+            WHERE username ~ '^[0-9]{8}$'
+          ),
+          10000010
+        ) + 1
+      ),
+      false
+    )
+  `;
 
   console.log('\n── Demo ready ─────────────────────────────────');
   console.log('Organizer login:');

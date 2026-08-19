@@ -1,27 +1,27 @@
-import * as crypto from 'crypto';
-
-/** Lowercase alphanumeric alphabet for player unique codes. */
-const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';
-
 export const UNIQUE_CODE_LENGTH = 8;
 
-/**
- * Cryptographically random 8-character alphanumeric code (a-z, 0-9).
- * Uniqueness must still be enforced against the database.
- */
-export function generateUniqueCodeCandidate(
-  length: number = UNIQUE_CODE_LENGTH,
+export const UNIQUE_CODE_MIN = 0;
+export const UNIQUE_CODE_MAX = 99_999_999;
+
+const NUMERIC_CODE_PATTERN = /^\d{8}$/;
+
+/** Zero-pad a numeric value to 8 digits for storage/display. */
+export function formatUniqueCodeForStorage(
+  value: number | string,
 ): string {
-  const bytes = crypto.randomBytes(length);
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += ALPHABET[bytes[i]! % ALPHABET.length];
+  const n =
+    typeof value === 'number'
+      ? value
+      : parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(n) || n < UNIQUE_CODE_MIN || n > UNIQUE_CODE_MAX) {
+    throw new RangeError(
+      `Unique code must be an integer from ${UNIQUE_CODE_MIN} to ${UNIQUE_CODE_MAX}.`,
+    );
   }
-  return result;
+  return String(n).padStart(UNIQUE_CODE_LENGTH, '0');
 }
 
+/** True when value is exactly 8 decimal digits. */
 export function isValidUniqueCode(value: string): boolean {
-  return new RegExp(
-    `^[a-z0-9]{${UNIQUE_CODE_LENGTH}}$`,
-  ).test(value.trim().toLowerCase());
+  return NUMERIC_CODE_PATTERN.test(value.trim());
 }

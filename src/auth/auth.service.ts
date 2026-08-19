@@ -10,7 +10,6 @@ import { Prisma, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { generateUniqueCodeCandidate } from '../common/unique-code';
 import { formatDisplayName } from '../common/display-name';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -137,7 +136,7 @@ export class AuthService {
 
     if (!user) {
       throw new BadRequestException(
-        'Could not allocate a unique player code. Please try again.',
+        'Could not allocate an 8-digit unique player code. Please try again.',
       );
     }
 
@@ -145,19 +144,18 @@ export class AuthService {
     return { ...tokens, user: this.sanitize(user) };
   }
 
-  /** Picks an unused 8-character alphanumeric code (stored as `username`). */
+  /** Allocates the next 8-digit numeric code from PostgreSQL sequence (stored as `username`). */
   private async allocateUniqueCode(): Promise<string> {
-    for (let attempt = 0; attempt < UNIQUE_CODE_MAX_ATTEMPTS; attempt++) {
-      const candidate = generateUniqueCodeCandidate();
-      const taken = await this.prisma.user.findUnique({
-        where: { username: candidate },
-        select: { id: true },
-      });
-      if (!taken) return candidate;
+    const rows = await this.prisma.$queryRaw<{ code: string }[]>`
+      SELECT lpad(nextval('player_unique_code_seq')::text, 8, '0') AS code
+    `;
+    const code = rows[0]?.code;
+    if (!code) {
+      throw new BadRequestException(
+        'Could not allocate an 8-digit unique player code. Please try again.',
+      );
     }
-    throw new BadRequestException(
-      'Could not allocate a unique player code. Please try again.',
-    );
+    return code;
   }
 
   async login(dto: LoginDto) {
