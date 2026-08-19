@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { ChessMatchResult } from '@prisma/client';
+import { ChessMatchResult, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+
+type RatingDbClient = PrismaService | Prisma.TransactionClient;
 import {
   CHESS_DRAW_POINTS,
   CHESS_LOSS_POINTS,
@@ -53,8 +55,12 @@ export class ChessRatingService {
     return isWhite ? 0 : 1;
   }
 
-  async ensureRating(userId: string, gameId: string) {
-    return this.prisma.playerGameRating.upsert({
+  async ensureRating(
+    userId: string,
+    gameId: string,
+    client: RatingDbClient = this.prisma,
+  ) {
+    return client.playerGameRating.upsert({
       where: { userId_gameId: { userId, gameId } },
       create: {
         userId,
@@ -70,10 +76,12 @@ export class ChessRatingService {
     whiteUserId: string,
     blackUserId: string,
     result: ChessMatchResult,
+    client?: Prisma.TransactionClient,
   ) {
+    const db = client ?? this.prisma;
     const [whiteRating, blackRating] = await Promise.all([
-      this.ensureRating(whiteUserId, gameId),
-      this.ensureRating(blackUserId, gameId),
+      this.ensureRating(whiteUserId, gameId, db),
+      this.ensureRating(blackUserId, gameId, db),
     ]);
 
     const whiteScore = this.scoreForResult(true, result);
@@ -97,8 +105,8 @@ export class ChessRatingService {
     const blackOutcome =
       blackScore === 1 ? 'wins' : blackScore === 0 ? 'losses' : 'draws';
 
-    await this.prisma.$transaction([
-      this.prisma.playerGameRating.update({
+    const updates = [
+      db.playerGameRating.update({
         where: { id: whiteRating.id },
         data: {
           rating: newWhiteRating,
@@ -106,7 +114,7 @@ export class ChessRatingService {
           [whiteOutcome]: { increment: 1 },
         },
       }),
-      this.prisma.playerGameRating.update({
+      db.playerGameRating.update({
         where: { id: blackRating.id },
         data: {
           rating: newBlackRating,
@@ -114,7 +122,13 @@ export class ChessRatingService {
           [blackOutcome]: { increment: 1 },
         },
       }),
-    ]);
+    ];
+
+    if (client) {
+      await Promise.all(updates);
+    } else {
+      await this.prisma.$transaction(updates);
+    }
 
     return {
       white: { previous: whiteRating.rating, updated: newWhiteRating },

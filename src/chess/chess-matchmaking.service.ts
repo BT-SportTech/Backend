@@ -367,7 +367,7 @@ export class ChessMatchmakingService {
   async listMatches(eventId: string, user: User) {
     const event = await this.getChessEventOrThrow(eventId, user, true);
 
-    if (event.gameId) {
+    if (event.gameId && user.role === UserRole.PLAYER) {
       await this.backfillMissingRatingSnapshots(event.gameId);
     }
 
@@ -423,8 +423,36 @@ export class ChessMatchmakingService {
         batch: { round: { eventId } },
       },
       include: {
-        whiteRegistration: true,
-        blackRegistration: true,
+        whiteRegistration: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true,
+              },
+            },
+          },
+        },
+        blackRegistration: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                username: true,
+              },
+            },
+          },
+        },
+        batch: {
+          select: {
+            batchNumber: true,
+            round: { select: { roundNumber: true } },
+          },
+        },
       },
     });
 
@@ -440,20 +468,21 @@ export class ChessMatchmakingService {
       throw new BadRequestException('Event has no linked game.');
     }
 
-    await this.prisma.$transaction(async (tx) => {
+    const gameId = event.gameId;
+    const completedAt = new Date();
+    const whiteWon = result === ChessMatchResult.WHITE_WIN;
+    const blackWon = result === ChessMatchResult.BLACK_WIN;
+
+    const ratingChange = await this.prisma.$transaction(async (tx) => {
       await tx.chessMatch.update({
         where: { id: matchId },
         data: {
           result,
           status: ChessMatchStatus.COMPLETED,
-          completedAt: new Date(),
+          completedAt,
           completedById: user.id,
         },
       });
-
-      const whiteWon = result === ChessMatchResult.WHITE_WIN;
-      const blackWon = result === ChessMatchResult.BLACK_WIN;
-      const isDraw = result === ChessMatchResult.DRAW;
 
       await tx.eventRegistration.update({
         where: { id: match.whiteRegistrationId },
@@ -480,39 +509,47 @@ export class ChessMatchmakingService {
               : { eventDraws: { increment: 1 } }),
         },
       });
-    });
 
-    const ratingChange = await this.ratingService.updateRatingsForMatch(
-      event.gameId,
-      match.whiteRegistration.userId,
-      match.blackRegistration.userId,
-      result,
-    );
+      const ratings = await this.ratingService.updateRatingsForMatch(
+        gameId,
+        match.whiteRegistration.userId,
+        match.blackRegistration.userId,
+        result,
+        tx,
+      );
 
-    await this.prisma.chessMatch.update({
-      where: { id: matchId },
-      data: {
-        whiteRatingBefore: ratingChange.white.previous,
-        whiteRatingAfter: ratingChange.white.updated,
-        blackRatingBefore: ratingChange.black.previous,
-        blackRatingAfter: ratingChange.black.updated,
-      },
-    });
-
-    const updated = await this.prisma.chessMatch.findUniqueOrThrow({
-      where: { id: matchId },
-      include: {
-        batch: {
-          select: {
-            batchNumber: true,
-            round: { select: { roundNumber: true } },
-          },
+      await tx.chessMatch.update({
+        where: { id: matchId },
+        data: {
+          whiteRatingBefore: ratings.white.previous,
+          whiteRatingAfter: ratings.white.updated,
+          blackRatingBefore: ratings.black.previous,
+          blackRatingAfter: ratings.black.updated,
         },
-        ...this.matchInclude(),
-      },
+      });
+
+      return ratings;
     });
 
-    return this.toMatchResponse(updated);
+    return this.toMatchResponse({
+      id: match.id,
+      boardNumber: match.boardNumber,
+      result,
+      status: ChessMatchStatus.COMPLETED,
+      completedAt,
+      whiteRatingBefore: ratingChange.white.previous,
+      whiteRatingAfter: ratingChange.white.updated,
+      blackRatingBefore: ratingChange.black.previous,
+      blackRatingAfter: ratingChange.black.updated,
+      batch: match.batch,
+      whiteRegistration: match.whiteRegistration,
+      blackRegistration: match.blackRegistration,
+      completedBy: {
+        id: user.id,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      },
+    });
   }
 
   async withdrawPlayer(
