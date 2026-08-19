@@ -206,7 +206,7 @@ export class EventsService {
       if (!assigned) {
         throw new ForbiddenException('You are not assigned to this event.');
       }
-      return this.toOrganizerEventResponse(event);
+      return this.toEventResponse(event);
     }
 
     if (user.role === UserRole.PLAYER) {
