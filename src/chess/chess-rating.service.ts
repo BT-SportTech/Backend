@@ -135,4 +135,23 @@ export class ChessRatingService {
       black: { previous: blackRating.rating, updated: newBlackRating },
     };
   }
+
+  /** Walkover: only the winner gains rating; withdrawn player is unchanged. */
+  async applyWalkoverWin(
+    winnerUserId: string,
+    gameId: string,
+    client: Prisma.TransactionClient,
+  ) {
+    const rating = await this.ensureRating(winnerUserId, gameId, client);
+    const updated = rating.rating + CHESS_WIN_POINTS;
+    await client.playerGameRating.update({
+      where: { id: rating.id },
+      data: {
+        rating: updated,
+        gamesPlayed: { increment: 1 },
+        wins: { increment: 1 },
+      },
+    });
+    return { previous: rating.rating, updated };
+  }
 }

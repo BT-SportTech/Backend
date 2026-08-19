@@ -3,6 +3,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import {
+  ChessMatchResult,
   ChessMatchStatus,
   EventStatus,
   MatchmakingStatus,
@@ -60,7 +61,7 @@ describe('ChessMatchmakingService', () => {
       findFirst: jest.Mock;
       update: jest.Mock;
     };
-    playerGameRating: { findMany: jest.Mock };
+    playerGameRating: { findMany: jest.Mock; upsert: jest.Mock; update: jest.Mock };
     game: { findFirst: jest.Mock };
     $transaction: jest.Mock;
   };
@@ -97,6 +98,8 @@ describe('ChessMatchmakingService', () => {
       },
       playerGameRating: {
         findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn(),
+        update: jest.fn(),
       },
       game: {
         findFirst: jest.fn().mockResolvedValue(chessGame),
@@ -222,58 +225,93 @@ describe('ChessMatchmakingService', () => {
   });
 
   describe('withdrawPlayer', () => {
-    it('withdraws attended player and cancels scheduled matches', async () => {
+    it('withdraws attended player and awards walkover wins to opponents', async () => {
       prisma.event.findUnique.mockResolvedValue({
         ...chessEvent,
         matchmakingStatus: MatchmakingStatus.IN_PROGRESS,
       });
       prisma.eventRegistration.findFirst.mockResolvedValue({
-        id: 'reg-1',
+        id: 'reg-withdrawn',
         attendedAt: new Date(),
         withdrawnAt: null,
         status: RegistrationStatus.CONFIRMED,
       });
       prisma.chessMatch.findMany.mockResolvedValue([
-        { id: 'match-1', status: ChessMatchStatus.SCHEDULED },
-      ]);
-      prisma.eventRegistration.update.mockResolvedValue({
-        id: 'reg-1',
-        userId: 'u1',
-        attendedAt: new Date(),
-        withdrawnAt: new Date(),
-        withdrawnById: organizer.id,
-        user: {
-          id: 'u1',
-          firstName: 'A',
-          lastName: 'One',
-          username: 'aone',
+        {
+          id: 'match-1',
+          status: ChessMatchStatus.SCHEDULED,
+          whiteRegistrationId: 'reg-withdrawn',
+          blackRegistrationId: 'reg-opponent',
+          whiteRegistration: { id: 'reg-withdrawn', userId: 'u-withdrawn' },
+          blackRegistration: { id: 'reg-opponent', userId: 'u-opponent' },
         },
-      });
+      ]);
+      prisma.playerGameRating.upsert
+        .mockResolvedValueOnce({
+          id: 'rating-opponent',
+          rating: 10000,
+          gamesPlayed: 0,
+        })
+        .mockResolvedValueOnce({
+          id: 'rating-withdrawn',
+          rating: 10050,
+          gamesPlayed: 2,
+        });
+      prisma.playerGameRating.update.mockResolvedValue({});
+      prisma.eventRegistration.update.mockResolvedValue({});
       prisma.eventRegistration.findUniqueOrThrow.mockResolvedValue({
-        id: 'reg-1',
-        userId: 'u1',
+        id: 'reg-withdrawn',
+        userId: 'u-withdrawn',
         attendedAt: new Date(),
         withdrawnAt: new Date(),
         withdrawnById: organizer.id,
         user: {
-          id: 'u1',
-          firstName: 'A',
-          lastName: 'One',
-          username: 'aone',
+          id: 'u-withdrawn',
+          firstName: 'Ishita',
+          lastName: 'Nair',
+          username: 'ishita',
         },
       });
 
       const result = await service.withdrawPlayer(
         'event-1',
-        'reg-1',
+        'reg-withdrawn',
         organizer as never,
       );
 
       expect(result.withdrawnAt).toBeTruthy();
       expect(result.attendedAt).toBeTruthy();
+      expect(prisma.eventRegistration.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'reg-opponent' },
+          data: expect.objectContaining({
+            gamesCompleted: { increment: 1 },
+            eventWins: { increment: 1 },
+            blackGames: { increment: 1 },
+          }),
+        }),
+      );
+      expect(prisma.playerGameRating.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'rating-opponent' },
+          data: expect.objectContaining({
+            rating: 10100,
+            gamesPlayed: { increment: 1 },
+            wins: { increment: 1 },
+          }),
+        }),
+      );
       expect(prisma.chessMatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: { status: ChessMatchStatus.CANCELLED },
+          where: { id: 'match-1' },
+          data: expect.objectContaining({
+            status: ChessMatchStatus.COMPLETED,
+            result: ChessMatchResult.BLACK_WIN,
+            whiteRatingBefore: 10050,
+            whiteRatingAfter: 10050,
+            blackRatingBefore: 10000,
+            blackRatingAfter: 10100,
+          }),
         }),
       );
     });

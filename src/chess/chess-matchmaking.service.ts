@@ -281,6 +281,46 @@ export class ChessMatchmakingService {
           })
         : [];
     const ratingByUser = new Map(ratings.map((r) => [r.userId, r.rating]));
+
+    const completedMatches = await this.prisma.chessMatch.findMany({
+      where: {
+        status: ChessMatchStatus.COMPLETED,
+        batch: { round: { eventId } },
+      },
+      select: {
+        whiteRegistrationId: true,
+        blackRegistrationId: true,
+        whiteRatingBefore: true,
+        whiteRatingAfter: true,
+        blackRatingBefore: true,
+        blackRatingAfter: true,
+      },
+    });
+    const eventRatingDeltaByRegistration = new Map<string, number>();
+    for (const match of completedMatches) {
+      if (
+        match.whiteRatingBefore != null &&
+        match.whiteRatingAfter != null
+      ) {
+        const delta = match.whiteRatingAfter - match.whiteRatingBefore;
+        eventRatingDeltaByRegistration.set(
+          match.whiteRegistrationId,
+          (eventRatingDeltaByRegistration.get(match.whiteRegistrationId) ??
+            0) + delta,
+        );
+      }
+      if (
+        match.blackRatingBefore != null &&
+        match.blackRatingAfter != null
+      ) {
+        const delta = match.blackRatingAfter - match.blackRatingBefore;
+        eventRatingDeltaByRegistration.set(
+          match.blackRegistrationId,
+          (eventRatingDeltaByRegistration.get(match.blackRegistrationId) ??
+            0) + delta,
+        );
+      }
+    }
     const userIds = registrations.map((r) => r.userId);
     const totalPointsByUser =
       await this.usersService.getTotalPointsByUserIds(userIds);
@@ -333,22 +373,29 @@ export class ChessMatchmakingService {
             ).length,
           }
         : null,
-      playerProgress: registrations.map((r) => ({
-        registrationId: r.id,
-        userId: r.userId,
-        user: {
-          ...r.user,
-          totalPoints: totalPointsByUser.get(r.userId) ?? 0,
-        },
-        withdrawn: !!r.withdrawnAt,
-        gamesCompleted: r.gamesCompleted,
-        eventWins: r.eventWins,
-        eventLosses: r.eventLosses,
-        eventDraws: r.eventDraws,
-        whiteGames: r.whiteGames,
-        blackGames: r.blackGames,
-        rating: ratingByUser.get(r.userId) ?? CHESS_STARTING_POINTS,
-      })),
+      playerProgress: registrations.map((r) => {
+        const rating = ratingByUser.get(r.userId) ?? CHESS_STARTING_POINTS;
+        const eventRatingDelta =
+          eventRatingDeltaByRegistration.get(r.id) ?? 0;
+        return {
+          registrationId: r.id,
+          userId: r.userId,
+          user: {
+            ...r.user,
+            totalPoints: totalPointsByUser.get(r.userId) ?? 0,
+          },
+          withdrawn: !!r.withdrawnAt,
+          gamesCompleted: r.gamesCompleted,
+          eventWins: r.eventWins,
+          eventLosses: r.eventLosses,
+          eventDraws: r.eventDraws,
+          whiteGames: r.whiteGames,
+          blackGames: r.blackGames,
+          rating,
+          eventRatingDelta,
+          ratingBeforeEvent: rating - eventRatingDelta,
+        };
+      }),
       rounds: event.chessRounds.map((r) => ({
         id: r.id,
         gameNumber: r.roundNumber,
@@ -587,6 +634,13 @@ export class ChessMatchmakingService {
       throw new BadRequestException('Player is already withdrawn.');
     }
 
+    if (!event.gameId) {
+      throw new BadRequestException('Event has no linked game.');
+    }
+
+    const gameId = event.gameId;
+    const completedAt = new Date();
+
     await this.prisma.$transaction(async (tx) => {
       await tx.eventRegistration.update({
         where: { id: registrationId },
@@ -604,12 +658,72 @@ export class ChessMatchmakingService {
             { blackRegistrationId: registrationId },
           ],
         },
+        include: {
+          whiteRegistration: { select: { id: true, userId: true } },
+          blackRegistration: { select: { id: true, userId: true } },
+        },
       });
 
       for (const match of scheduledMatches) {
+        const withdrawnIsWhite = match.whiteRegistrationId === registrationId;
+        const opponentReg = withdrawnIsWhite
+          ? match.blackRegistration
+          : match.whiteRegistration;
+        const result = withdrawnIsWhite
+          ? ChessMatchResult.BLACK_WIN
+          : ChessMatchResult.WHITE_WIN;
+        const withdrawnUserId = withdrawnIsWhite
+          ? match.whiteRegistration.userId
+          : match.blackRegistration.userId;
+        const winnerUserId = opponentReg.userId;
+
+        await tx.eventRegistration.update({
+          where: { id: opponentReg.id },
+          data: {
+            gamesCompleted: { increment: 1 },
+            eventWins: { increment: 1 },
+            ...(withdrawnIsWhite
+              ? { blackGames: { increment: 1 } }
+              : { whiteGames: { increment: 1 } }),
+          },
+        });
+
+        const winnerRating = await this.ratingService.applyWalkoverWin(
+          winnerUserId,
+          gameId,
+          tx,
+        );
+        const withdrawnRating = await this.ratingService.ensureRating(
+          withdrawnUserId,
+          gameId,
+          tx,
+        );
+
+        const whiteRatingBefore = withdrawnIsWhite
+          ? withdrawnRating.rating
+          : winnerRating.previous;
+        const whiteRatingAfter = withdrawnIsWhite
+          ? withdrawnRating.rating
+          : winnerRating.updated;
+        const blackRatingBefore = withdrawnIsWhite
+          ? winnerRating.previous
+          : withdrawnRating.rating;
+        const blackRatingAfter = withdrawnIsWhite
+          ? winnerRating.updated
+          : withdrawnRating.rating;
+
         await tx.chessMatch.update({
           where: { id: match.id },
-          data: { status: ChessMatchStatus.CANCELLED },
+          data: {
+            result,
+            status: ChessMatchStatus.COMPLETED,
+            completedAt,
+            completedById: user.id,
+            whiteRatingBefore,
+            whiteRatingAfter,
+            blackRatingBefore,
+            blackRatingAfter,
+          },
         });
       }
     });
