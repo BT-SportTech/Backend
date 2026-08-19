@@ -206,19 +206,19 @@ export class EventsService {
       if (!assigned) {
         throw new ForbiddenException('You are not assigned to this event.');
       }
-      return this.toEventResponse(event);
+      return this.toOrganizerEventResponse(event);
     }
 
-    if (user.role !== UserRole.PLAYER) {
-      throw new ForbiddenException('Only players and admins can view events.');
+    if (user.role === UserRole.PLAYER) {
+      if (event.status !== EventStatus.PUBLISHED) {
+        throw new ForbiddenException('Event is not available.');
+      }
+
+      const isRegistered = await this.isUserRegistered(event.id, user.id);
+      return this.toEventResponse(event, isRegistered);
     }
 
-    if (event.status !== EventStatus.PUBLISHED) {
-      throw new ForbiddenException('Event is not available.');
-    }
-
-    const isRegistered = await this.isUserRegistered(event.id, user.id);
-    return this.toEventResponse(event, isRegistered);
+    throw new ForbiddenException('Only players and admins can view events.');
   }
 
   async update(id: string, dto: UpdateEventDto) {
@@ -538,7 +538,7 @@ export class EventsService {
     }
     if (user.role === UserRole.ORGANIZER) {
       await this.assertOrganizerAssigned(eventId, user.id);
-      return this.listRegistrations(eventId);
+      return this.listRegistrationsForOrganizer(eventId);
     }
     throw new ForbiddenException('Not allowed to view registrations.');
   }
@@ -558,7 +558,7 @@ export class EventsService {
     });
 
     return {
-      data: rows.map((e) => this.toEventResponse(e)),
+      data: rows.map((e) => this.toOrganizerEventResponse(e)),
     };
   }
 
@@ -577,7 +577,7 @@ export class EventsService {
     });
 
     return {
-      data: rows.map((e) => this.toEventResponse(e)),
+      data: rows.map((e) => this.toOrganizerEventResponse(e)),
       meta: { total: rows.length },
     };
   }
@@ -647,6 +647,55 @@ export class EventsService {
       attendedById: updated.attendedById,
       attendedBy: updated.attendedBy,
       user: updated.user,
+    };
+  }
+
+  private async listRegistrationsForOrganizer(eventId: string) {
+    const event = await this.prisma.event.findUnique({
+      where: { id: eventId },
+    });
+    if (!event) throw new NotFoundException('Event not found.');
+
+    const attendanceWindowOpen = this.isAttendanceWindowOpen(
+      event.startsAt,
+      event.status,
+    );
+    const attendanceOpensAt = new Date(
+      event.startsAt.getTime() - 30 * 60 * 1000,
+    );
+
+    if (!attendanceWindowOpen) {
+      return {
+        eventId,
+        data: [],
+        attendanceWindowOpen,
+        attendanceOpensAt,
+      };
+    }
+
+    const rows = await this.prisma.eventRegistration.findMany({
+      where: { eventId, status: RegistrationStatus.CONFIRMED },
+      include: {
+        user: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+      orderBy: { registeredAt: 'asc' },
+    });
+
+    return {
+      eventId,
+      data: rows.map((r) => ({
+        id: r.id,
+        attendedAt: r.attendedAt,
+        user: r.user,
+      })),
+      attendanceWindowOpen,
+      attendanceOpensAt,
     };
   }
 
@@ -1278,6 +1327,25 @@ export class EventsService {
             startsAt: event.startsAt,
             venue: event.venue,
           },
+    };
+  }
+
+  private toOrganizerEventResponse(event: EventWithRelations) {
+    return {
+      id: event.id,
+      name: event.name,
+      sport: event.sport,
+      venue: event.venue,
+      state: event.state,
+      district: event.district,
+      startsAt: event.startsAt,
+      status: event.status,
+      imageUrl: event.imageUrl,
+      attendanceWindowOpen: this.isAttendanceWindowOpen(
+        event.startsAt,
+        event.status,
+      ),
+      attendanceOpensAt: new Date(event.startsAt.getTime() - 30 * 60 * 1000),
     };
   }
 
