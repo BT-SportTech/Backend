@@ -15,6 +15,8 @@ import {
   UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushNotificationsService } from '../notifications/push-notifications.service';
+import { EventPushSchedulerService } from '../notifications/event-push-scheduler.service';
 import { UsersService } from '../users/users.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
@@ -65,6 +67,8 @@ export class EventsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
+    private readonly pushNotifications: PushNotificationsService,
+    private readonly eventPushScheduler: EventPushSchedulerService,
   ) {}
 
   async create(dto: CreateEventDto, adminId: string) {
@@ -352,6 +356,10 @@ export class EventsService {
       });
     });
 
+    if (dto.startsAt !== undefined) {
+      this.eventPushScheduler.rescheduleEventReminders(id);
+    }
+
     return this.toEventResponse(updated);
   }
 
@@ -390,6 +398,7 @@ export class EventsService {
       data: { status: EventStatus.PUBLISHED },
       include: eventInclude,
     });
+    this.eventPushScheduler.notifyEligiblePlayersOnPublish(updated);
     return this.toEventResponse(updated);
   }
 
@@ -830,6 +839,7 @@ export class EventsService {
       data: { status: EventStatus.CANCELLED },
       include: eventInclude,
     });
+    this.eventPushScheduler.cancelEventReminders(id);
     return this.toEventResponse(updated);
   }
 
@@ -960,6 +970,8 @@ export class EventsService {
           event: { include: eventInclude },
         },
       });
+      this.notifyRegistrationConfirmed(user.id, event);
+      this.eventPushScheduler.scheduleRegistrationReminders(event, user.id);
       return this.toRegistrationResponse(revived, event);
     }
 
@@ -975,6 +987,8 @@ export class EventsService {
           event: { include: eventInclude },
         },
       });
+      this.notifyRegistrationConfirmed(user.id, event);
+      this.eventPushScheduler.scheduleRegistrationReminders(event, user.id);
       return this.toRegistrationResponse(created, event);
     } catch (err) {
       if (
@@ -1212,6 +1226,19 @@ export class EventsService {
       },
     });
     return !!reg;
+  }
+
+  private notifyRegistrationConfirmed(
+    userId: string,
+    event: { id: string; name: string },
+  ) {
+    this.pushNotifications.sendToUser(userId, {
+      type: 'event_registration_confirmed',
+      notificationId: `n_${event.id}`,
+      eventId: event.id,
+      title: 'Registration confirmed',
+      body: `You are registered for ${event.name}.`,
+    });
   }
 
   private async requireActiveGame(gameId: string) {
