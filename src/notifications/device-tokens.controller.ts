@@ -4,6 +4,7 @@ import * as Prisma from '@prisma/client';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { DeviceTokensService } from './device-tokens.service';
+import { PushNotificationsService } from './push-notifications.service';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import { RemoveDeviceTokenDto } from './dto/remove-device-token.dto';
 
@@ -12,15 +13,26 @@ import { RemoveDeviceTokenDto } from './dto/remove-device-token.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('users/me/device-tokens')
 export class DeviceTokensController {
-  constructor(private readonly deviceTokens: DeviceTokensService) {}
+  constructor(
+    private readonly deviceTokens: DeviceTokensService,
+    private readonly pushNotifications: PushNotificationsService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Register or refresh an FCM device token for the current user' })
-  register(
+  async register(
     @CurrentUser() user: Prisma.User,
     @Body() dto: RegisterDeviceTokenDto,
   ) {
-    return this.deviceTokens.register(user.id, dto.token, dto.platform);
+    const { deviceToken, isFirstToken } = await this.deviceTokens.register(
+      user.id,
+      dto.token,
+      dto.platform,
+    );
+    if (isFirstToken) {
+      this.pushNotifications.sendWelcomeIfNewProfile(user);
+    }
+    return deviceToken;
   }
 
   @Delete()

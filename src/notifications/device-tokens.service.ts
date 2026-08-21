@@ -7,7 +7,10 @@ export class DeviceTokensService {
 
   async register(userId: string, token: string, platform: 'android' | 'ios') {
     const normalized = token.trim();
-    return this.prisma.deviceToken.upsert({
+    const priorCount = await this.prisma.deviceToken.count({
+      where: { userId },
+    });
+    const deviceToken = await this.prisma.deviceToken.upsert({
       where: { token: normalized },
       create: {
         userId,
@@ -19,6 +22,7 @@ export class DeviceTokensService {
         platform,
       },
     });
+    return { deviceToken, isFirstToken: priorCount === 0 };
   }
 
   async remove(userId: string, token: string) {

@@ -15,6 +15,10 @@ import {
   MulticastPayload,
   sendTokensWithRetry,
 } from './push-batch.util';
+import {
+  buildWelcomePushPayload,
+  isWithinWelcomeWindow,
+} from './welcome-push.util';
 
 export type PushNotificationPayload = {
   title: string;
@@ -95,6 +99,16 @@ export class PushNotificationsService implements OnModuleInit {
 
   sendToUser(userId: string, payload: PushNotificationPayload) {
     void this.sendToUserAsync(userId, payload);
+  }
+
+  sendWelcomeIfNewProfile(user: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    createdAt: Date;
+  }) {
+    if (!isWithinWelcomeWindow(user.createdAt)) return;
+    this.sendToUser(user.id, buildWelcomePushPayload(user));
   }
 
   sendToUsers(userIds: string[], payload: PushNotificationPayload) {

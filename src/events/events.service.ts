@@ -14,6 +14,11 @@ import {
   User,
   UserRole,
 } from '@prisma/client';
+import {
+  assertPlayerCanRegister,
+  browseablePublishedWhere,
+  sortBrowseEvents,
+} from './event-registration.guard';
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../notifications/push-notifications.service';
 import { EventPushSchedulerService } from '../notifications/event-push-scheduler.service';
@@ -214,12 +219,20 @@ export class EventsService {
     }
 
     if (user.role === UserRole.PLAYER) {
-      if (event.status !== EventStatus.PUBLISHED) {
-        throw new ForbiddenException('Event is not available.');
+      if (event.status === EventStatus.PUBLISHED) {
+        const isRegistered = await this.isUserRegistered(event.id, user.id);
+        return this.toEventResponse(event, isRegistered);
       }
 
-      const isRegistered = await this.isUserRegistered(event.id, user.id);
-      return this.toEventResponse(event, isRegistered);
+      if (event.status === EventStatus.COMPLETED) {
+        const isRegistered = await this.isUserRegistered(event.id, user.id);
+        if (!isRegistered) {
+          throw new ForbiddenException('Event is not available.');
+        }
+        return this.toEventResponse(event, true);
+      }
+
+      throw new ForbiddenException('Event is not available.');
     }
 
     throw new ForbiddenException('Only players and admins can view events.');
@@ -848,13 +861,14 @@ export class EventsService {
       throw new ForbiddenException('Only players can list eligible events.');
     }
 
-    // Show all published events; eligibility is enforced at registration.
+  // Browse list: published events still accepting attention (not in play / finished).
     const page = query.page ?? 1;
     const limit = query.limit ?? 10;
     const skip = (page - 1) * limit;
+    const now = new Date();
 
     const where: Prisma.EventWhereInput = {
-      status: EventStatus.PUBLISHED,
+      ...browseablePublishedWhere(now),
       ...(query.sport
         ? { sport: { equals: query.sport, mode: 'insensitive' } }
         : {}),
@@ -873,16 +887,13 @@ export class EventsService {
         : {}),
     };
 
-    const [candidates, total] = await Promise.all([
-      this.prisma.event.findMany({
-        where,
-        include: eventInclude,
-        orderBy: { startsAt: 'asc' },
-        skip,
-        take: limit,
-      }),
-      this.prisma.event.count({ where }),
-    ]);
+    const allMatching = await this.prisma.event.findMany({
+      where,
+      include: eventInclude,
+    });
+    const sorted = sortBrowseEvents(allMatching, now);
+    const total = sorted.length;
+    const candidates = sorted.slice(skip, skip + limit);
 
     const registrations = await this.prisma.eventRegistration.findMany({
       where: {
@@ -912,19 +923,15 @@ export class EventsService {
       throw new ForbiddenException('Only players can register for events.');
     }
 
-    const event = await this.prisma.event.findUnique({
+    const preview = await this.prisma.event.findUnique({
       where: { id: eventId },
       include: eventInclude,
     });
-    if (!event) throw new NotFoundException('Event not found.');
+    if (!preview) throw new NotFoundException('Event not found.');
 
-    if (event.status !== EventStatus.PUBLISHED) {
-      throw new BadRequestException('Event is not open for registration.');
-    }
+    this.assertRegistrationProfile(user, preview);
 
-    this.assertRegistrationProfile(user, event);
-
-    const ineligibleReason = this.getIneligibilityReason(user, event);
+    const ineligibleReason = this.getIneligibilityReason(user, preview);
     if (ineligibleReason) {
       throw new ForbiddenException({
         statusCode: 403,
@@ -935,70 +942,80 @@ export class EventsService {
     }
 
     const now = new Date();
-    if (now < event.registrationOpensAt) {
-      throw new BadRequestException('Registration has not opened yet.');
-    }
-    if (now > event.registrationClosesAt) {
-      throw new BadRequestException('Registration deadline has passed.');
-    }
+    const paymentData = this.buildRegistrationPaymentData(preview.fee, dto);
 
-    const confirmedCount = event._count.registrations;
-    if (confirmedCount >= event.maxParticipants) {
-      throw new BadRequestException('Event is full.');
-    }
+    const registration = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "Event" WHERE id = ${eventId} FOR UPDATE`;
 
-    const paymentData = this.buildRegistrationPaymentData(event.fee, dto);
+      const event = await tx.event.findUnique({
+        where: { id: eventId },
+        include: eventInclude,
+      });
+      if (!event) throw new NotFoundException('Event not found.');
 
-    const existing = await this.prisma.eventRegistration.findUnique({
-      where: {
-        eventId_userId: { eventId, userId: user.id },
-      },
+      const confirmedCount = await tx.eventRegistration.count({
+        where: {
+          eventId,
+          status: RegistrationStatus.CONFIRMED,
+        },
+      });
+
+      assertPlayerCanRegister(user, event, confirmedCount, now);
+
+      const existing = await tx.eventRegistration.findUnique({
+        where: {
+          eventId_userId: { eventId, userId: user.id },
+        },
+      });
+
+      if (existing?.status === RegistrationStatus.CONFIRMED) {
+        throw new ConflictException('Already registered for this event.');
+      }
+
+      if (existing) {
+        return tx.eventRegistration.update({
+          where: { id: existing.id },
+          data: {
+            status: RegistrationStatus.CONFIRMED,
+            registeredAt: now,
+            ...paymentData,
+          },
+          include: {
+            event: { include: eventInclude },
+          },
+        });
+      }
+
+      try {
+        return await tx.eventRegistration.create({
+          data: {
+            eventId,
+            userId: user.id,
+            status: RegistrationStatus.CONFIRMED,
+            ...paymentData,
+          },
+          include: {
+            event: { include: eventInclude },
+          },
+        });
+      } catch (err) {
+        if (
+          err instanceof Prisma.PrismaClientKnownRequestError &&
+          err.code === 'P2002'
+        ) {
+          throw new ConflictException('Already registered for this event.');
+        }
+        throw err;
+      }
     });
 
-    if (existing) {
-      if (existing.status === RegistrationStatus.CONFIRMED) {
-        throw new ConflictException('Already registered for this event.');
-      }
-      const revived = await this.prisma.eventRegistration.update({
-        where: { id: existing.id },
-        data: {
-          status: RegistrationStatus.CONFIRMED,
-          registeredAt: new Date(),
-          ...paymentData,
-        },
-        include: {
-          event: { include: eventInclude },
-        },
-      });
-      this.notifyRegistrationConfirmed(user.id, event);
-      this.eventPushScheduler.scheduleRegistrationReminders(event, user.id);
-      return this.toRegistrationResponse(revived, event);
-    }
-
-    try {
-      const created = await this.prisma.eventRegistration.create({
-        data: {
-          eventId,
-          userId: user.id,
-          status: RegistrationStatus.CONFIRMED,
-          ...paymentData,
-        },
-        include: {
-          event: { include: eventInclude },
-        },
-      });
-      this.notifyRegistrationConfirmed(user.id, event);
-      this.eventPushScheduler.scheduleRegistrationReminders(event, user.id);
-      return this.toRegistrationResponse(created, event);
-    } catch (err) {
-      if (
-        err instanceof Prisma.PrismaClientKnownRequestError &&
-        err.code === 'P2002'
-      ) {
-        throw new ConflictException('Already registered for this event.');
-      }
-      throw err;
-    }
+    const eventForNotify = registration.event;
+    this.notifyRegistrationConfirmed(user.id, eventForNotify);
+    this.eventPushScheduler.scheduleRegistrationReminders(
+      eventForNotify,
+      user.id,
+    );
+    return this.toRegistrationResponse(registration, eventForNotify);
   }
 
   async myRegistrations(user: User, query: EventQueryDto) {
