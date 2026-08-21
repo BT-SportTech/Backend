@@ -7,6 +7,7 @@ import { GamesModule } from './games/games.module';
 import { MailModule } from './mail/mail.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { OrganizersModule } from './organizers/organizers.module';
+import { PaymentsModule } from './payments/payments.module';
 import { PlacesModule } from './places/places.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { SchoolsModule } from './schools/schools.module';
@@ -16,6 +17,7 @@ import { UsersModule } from './users/users.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
+    PaymentsModule,
     MailModule,
     NotificationsModule,
     AuthModule,

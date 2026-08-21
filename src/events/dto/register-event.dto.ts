@@ -3,8 +3,8 @@ import { IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class RegisterEventDto {
   @ApiPropertyOptional({
-    example: 'MOCK-ABC123',
-    description: 'Payment or receipt reference from checkout',
+    deprecated: true,
+    description: 'Ignored for paid events; use Razorpay fields instead',
   })
   @IsOptional()
   @IsString()
@@ -12,11 +12,37 @@ export class RegisterEventDto {
   paymentRef?: string;
 
   @ApiPropertyOptional({
-    example: 'UPI',
-    description: 'Payment method: UPI, CARD, NET_BANKING, FREE',
+    deprecated: true,
+    description: 'Ignored for paid events; use Razorpay fields instead',
   })
   @IsOptional()
   @IsString()
   @MaxLength(32)
   paymentMethod?: string;
+
+  @ApiPropertyOptional({
+    example: 'order_Nxxxxxxxxxxxxxxx',
+    description: 'Razorpay order ID from checkout',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  razorpayOrderId?: string;
+
+  @ApiPropertyOptional({
+    example: 'pay_Nxxxxxxxxxxxxxxx',
+    description: 'Razorpay payment ID after successful checkout',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  razorpayPaymentId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Razorpay payment signature for server verification',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  razorpaySignature?: string;
 }

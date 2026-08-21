@@ -22,6 +22,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { PushNotificationsService } from '../notifications/push-notifications.service';
 import { EventPushSchedulerService } from '../notifications/event-push-scheduler.service';
+import { RazorpayService } from '../payments/razorpay.service';
 import { UsersService } from '../users/users.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
@@ -74,6 +75,7 @@ export class EventsService {
     private readonly usersService: UsersService,
     private readonly pushNotifications: PushNotificationsService,
     private readonly eventPushScheduler: EventPushSchedulerService,
+    private readonly razorpay: RazorpayService,
   ) {}
 
   async create(dto: CreateEventDto, adminId: string) {
@@ -942,72 +944,101 @@ export class EventsService {
     }
 
     const now = new Date();
-    const paymentData = this.buildRegistrationPaymentData(preview.fee, dto);
+    const paymentData = await this.resolveRegistrationPaymentData(
+      preview.fee,
+      eventId,
+      user,
+      dto,
+    );
 
-    const registration = await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT id FROM "Event" WHERE id = ${eventId} FOR UPDATE`;
+    let registration;
+    try {
+      registration = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT id FROM "Event" WHERE id = ${eventId} FOR UPDATE`;
 
-      const event = await tx.event.findUnique({
-        where: { id: eventId },
-        include: eventInclude,
-      });
-      if (!event) throw new NotFoundException('Event not found.');
-
-      const confirmedCount = await tx.eventRegistration.count({
-        where: {
-          eventId,
-          status: RegistrationStatus.CONFIRMED,
-        },
-      });
-
-      assertPlayerCanRegister(user, event, confirmedCount, now);
-
-      const existing = await tx.eventRegistration.findUnique({
-        where: {
-          eventId_userId: { eventId, userId: user.id },
-        },
-      });
-
-      if (existing?.status === RegistrationStatus.CONFIRMED) {
-        throw new ConflictException('Already registered for this event.');
-      }
-
-      if (existing) {
-        return tx.eventRegistration.update({
-          where: { id: existing.id },
-          data: {
-            status: RegistrationStatus.CONFIRMED,
-            registeredAt: now,
-            ...paymentData,
-          },
-          include: {
-            event: { include: eventInclude },
-          },
+        const event = await tx.event.findUnique({
+          where: { id: eventId },
+          include: eventInclude,
         });
-      }
+        if (!event) throw new NotFoundException('Event not found.');
 
-      try {
-        return await tx.eventRegistration.create({
-          data: {
+        const confirmedCount = await tx.eventRegistration.count({
+          where: {
             eventId,
-            userId: user.id,
             status: RegistrationStatus.CONFIRMED,
-            ...paymentData,
-          },
-          include: {
-            event: { include: eventInclude },
           },
         });
-      } catch (err) {
-        if (
-          err instanceof Prisma.PrismaClientKnownRequestError &&
-          err.code === 'P2002'
-        ) {
+
+        assertPlayerCanRegister(user, event, confirmedCount, now);
+
+        const existing = await tx.eventRegistration.findUnique({
+          where: {
+            eventId_userId: { eventId, userId: user.id },
+          },
+        });
+
+        if (existing?.status === RegistrationStatus.CONFIRMED) {
           throw new ConflictException('Already registered for this event.');
         }
-        throw err;
+
+        if (existing) {
+          return tx.eventRegistration.update({
+            where: { id: existing.id },
+            data: {
+              status: RegistrationStatus.CONFIRMED,
+              registeredAt: now,
+              ...paymentData,
+            },
+            include: {
+              event: { include: eventInclude },
+            },
+          });
+        }
+
+        try {
+          return await tx.eventRegistration.create({
+            data: {
+              eventId,
+              userId: user.id,
+              status: RegistrationStatus.CONFIRMED,
+              ...paymentData,
+            },
+            include: {
+              event: { include: eventInclude },
+            },
+          });
+        } catch (err) {
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002'
+          ) {
+            throw new ConflictException('Already registered for this event.');
+          }
+          throw err;
+        }
+      });
+    } catch (err) {
+      if (
+        preview.fee > 0 &&
+        dto.razorpayPaymentId?.trim() &&
+        err instanceof BadRequestException &&
+        err.message === 'Event is full.'
+      ) {
+        const amountPaise = Math.round(preview.fee * 100);
+        try {
+          await this.razorpay.refundPayment(
+            dto.razorpayPaymentId.trim(),
+            amountPaise,
+          );
+        } catch {
+          // Best-effort refund when capacity race is lost after payment.
+        }
+        throw new BadRequestException(
+          'Event is full. Your payment will be refunded shortly.',
+        );
       }
-    });
+      throw err;
+    }
 
     const eventForNotify = registration.event;
     this.notifyRegistrationConfirmed(user.id, eventForNotify);
@@ -1016,6 +1047,77 @@ export class EventsService {
       user.id,
     );
     return this.toRegistrationResponse(registration, eventForNotify);
+  }
+
+  async createCheckout(eventId: string, user: User) {
+    if (user.role !== UserRole.PLAYER) {
+      throw new ForbiddenException('Only players can register for events.');
+    }
+
+    const preview = await this.prisma.event.findUnique({
+      where: { id: eventId },
+      include: eventInclude,
+    });
+    if (!preview) throw new NotFoundException('Event not found.');
+
+    this.assertRegistrationProfile(user, preview);
+
+    const ineligibleReason = this.getIneligibilityReason(user, preview);
+    if (ineligibleReason) {
+      throw new ForbiddenException({
+        statusCode: 403,
+        error: 'Forbidden',
+        code: 'NOT_ELIGIBLE',
+        message: ineligibleReason,
+      });
+    }
+
+    if (preview.fee <= 0) {
+      throw new BadRequestException(
+        'This event is free. Confirm registration without payment.',
+      );
+    }
+
+    const now = new Date();
+    assertPlayerCanRegister(user, preview, preview._count.registrations, now);
+
+    const existing = await this.prisma.eventRegistration.findUnique({
+      where: {
+        eventId_userId: { eventId, userId: user.id },
+      },
+    });
+    if (existing?.status === RegistrationStatus.CONFIRMED) {
+      throw new ConflictException('Already registered for this event.');
+    }
+
+    const amountPaise = Math.round(preview.fee * 100);
+    const order = await this.razorpay.createOrder({
+      amountPaise,
+      receipt: `evt_${eventId.slice(-8)}_${Date.now()}`,
+      notes: {
+        eventId,
+        userId: user.id,
+      },
+    });
+
+    const fullName = [user.firstName, user.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    return {
+      keyId: this.razorpay.getKeyId(),
+      orderId: order.id,
+      amount: amountPaise,
+      currency: 'INR',
+      name: 'Sportech',
+      description: preview.name,
+      prefill: {
+        email: user.email ?? undefined,
+        contact: user.phone ?? undefined,
+        name: fullName || undefined,
+      },
+    };
   }
 
   async myRegistrations(user: User, query: EventQueryDto) {
@@ -1309,21 +1411,85 @@ export class EventsService {
     };
   }
 
-  private buildRegistrationPaymentData(fee: number, dto: RegisterEventDto) {
+  private async resolveRegistrationPaymentData(
+    fee: number,
+    eventId: string,
+    user: User,
+    dto: RegisterEventDto,
+  ) {
     const amountPaid = fee;
     const isPaid = amountPaid > 0;
-    const paymentRef = isPaid
-      ? (dto.paymentRef?.trim() ||
-          `PAY-${Date.now().toString(36).toUpperCase()}`)
-      : dto.paymentRef?.trim() || null;
+
+    if (!isPaid) {
+      return {
+        amountPaid,
+        paymentRef: dto.paymentRef?.trim() || null,
+        paidAt: null,
+        paymentMethod: 'FREE',
+      };
+    }
+
+    const orderId = dto.razorpayOrderId?.trim();
+    const paymentId = dto.razorpayPaymentId?.trim();
+    const signature = dto.razorpaySignature?.trim();
+
+    if (!orderId || !paymentId || !signature) {
+      throw new BadRequestException(
+        'Paid registration requires verified Razorpay payment.',
+      );
+    }
+
+    if (dto.paymentRef?.trim() || dto.paymentMethod?.trim()) {
+      throw new BadRequestException(
+        'Client payment fields are not accepted for paid events.',
+      );
+    }
+
+    const amountPaise = Math.round(fee * 100);
+    const verified = this.razorpay.verifyPayment({
+      orderId,
+      paymentId,
+      signature,
+    });
+    if (!verified) {
+      throw new BadRequestException('Invalid payment signature.');
+    }
+
+    const order = await this.razorpay.fetchOrder(orderId);
+    if (Number(order.amount) !== amountPaise) {
+      throw new BadRequestException('Payment amount does not match event fee.');
+    }
+
+    const notes = order.notes as Record<string, string> | undefined;
+    if (notes?.eventId !== eventId || notes?.userId !== user.id) {
+      throw new BadRequestException(
+        'Payment order does not match this registration.',
+      );
+    }
+
+    const payment = await this.razorpay.fetchPayment(paymentId);
+    if (payment.order_id !== orderId) {
+      throw new BadRequestException('Payment order mismatch.');
+    }
+    if (Number(payment.amount) !== amountPaise) {
+      throw new BadRequestException('Payment amount mismatch.');
+    }
+    if (payment.status !== 'captured' && payment.status !== 'authorized') {
+      throw new BadRequestException('Payment has not been completed.');
+    }
+
+    const existingPayment = await this.prisma.eventRegistration.findUnique({
+      where: { paymentRef: paymentId },
+    });
+    if (existingPayment) {
+      throw new ConflictException('This payment has already been used.');
+    }
 
     return {
       amountPaid,
-      paymentRef,
-      paidAt: isPaid ? new Date() : null,
-      paymentMethod: isPaid
-        ? (dto.paymentMethod?.trim().toUpperCase() || 'MOCK')
-        : 'FREE',
+      paymentRef: paymentId,
+      paidAt: new Date(),
+      paymentMethod: 'RAZORPAY',
     };
   }
 

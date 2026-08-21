@@ -225,6 +225,17 @@ export class EventsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.PLAYER)
+  @Post(':id/checkout')
+  @ApiOperation({ summary: 'Create Razorpay order for paid event registration' })
+  createCheckout(
+    @Param('id') id: string,
+    @CurrentUser() user: Prisma.User,
+  ) {
+    return this.eventsService.createCheckout(id, user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.PLAYER)
   @Post(':id/register')
   @ApiOperation({ summary: 'Register current player for an event' })
   register(
